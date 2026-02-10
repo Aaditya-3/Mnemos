@@ -71,7 +71,12 @@ def extract_memory(user_message: str) -> Optional[Memory]:
         return stored
     
     # Fallback to LLM-based extraction
-    prompt = """You are a memory extraction system. Your job is to identify and extract ANY personal information, preferences, facts, or details about the user that should be remembered for future conversations.
+    prompt = """You are a memory extraction system helping to build a long-term profile of the USER.
+
+ONLY extract information that was explicitly provided by the USER in their own words.
+Do NOT extract or infer information from the ASSISTANT's suggestions, examples, or questions.
+For example, if the assistant mentions pizza but the user never confirms they like pizza,
+you MUST NOT store \"pizza\" as a preference.
 
 EXTRACT these types of information:
 - Personal facts: name, age, location, occupation, role, company, education, skills, hobbies
@@ -80,7 +85,7 @@ EXTRACT these types of information:
 - Context: current projects, goals, interests, relationships, background
 - Any stable information about the user that would be useful to remember
 
-IMPORTANT: Be proactive! Extract information even if it's mentioned casually or indirectly.
+IMPORTANT: Be proactive, but ONLY based on what the USER actually states or clearly confirms.
 
 Examples of what to extract:
 - "I'm John" → fact: name = John
@@ -103,7 +108,8 @@ Return JSON format:
   "value": "the actual information"
 }
 
-If you find ANY extractable information, return the JSON. Only return null if there is absolutely no personal information.
+If you find ANY extractable information from the USER, return the JSON.
+Only return null if there is absolutely no personal information provided by the USER.
 
 User message: """ + user_message
     

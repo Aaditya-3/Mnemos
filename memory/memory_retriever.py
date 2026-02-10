@@ -14,11 +14,11 @@ def retrieve_memories(user_message: str) -> str:
     Retrieve relevant memories for the current user message.
     
     Returns a short summary string suitable for system prompt.
-    Uses all memories with confidence >= 0.5 (new memories start at 0.7).
+    Uses all memories with confidence >= 0.3 (new memories start at 0.7).
     """
     store = get_memory_store()
-    # Get all memories with confidence >= 0.5 (includes new memories at 0.7)
-    memories = store.get_memories_by_confidence(min_confidence=0.5)
+    # Get all memories with confidence >= 0.3 (includes new memories at 0.7)
+    memories = store.get_memories_by_confidence(min_confidence=0.3)
     
     if not memories:
         return ""

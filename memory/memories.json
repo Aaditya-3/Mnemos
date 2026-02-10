@@ -1,0 +1,29 @@
+[
+  {
+    "id": "feb2c7a3-1c86-4d8a-b24a-c7edeb3b3a91",
+    "type": "fact",
+    "key": "name",
+    "value": "Aaditya",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T16:10:40.774717",
+    "last_updated": "2026-02-10T16:10:40.774717"
+  },
+  {
+    "id": "6f7d6b47-4ab0-427d-a364-acb7ce9c2172",
+    "type": "fact",
+    "key": "has_not_shared_favourite_food",
+    "value": "true",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T16:12:42.869218",
+    "last_updated": "2026-02-10T16:12:42.869218"
+  },
+  {
+    "id": "7a134aa5-416d-4bd1-a1e0-a6d7bd60f82d",
+    "type": "preference",
+    "key": "preference",
+    "value": "eating pizza",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T16:12:52.326071",
+    "last_updated": "2026-02-10T16:12:52.326071"
+  }
+]

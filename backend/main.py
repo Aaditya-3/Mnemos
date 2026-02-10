@@ -111,27 +111,26 @@ async def chat(request: ChatRequest):
             chat_session = chat_sessions[chat_id]
             chat_session.updated_at = datetime.now()
 
-        try:
-            memory_extracted = extract_memory(user_message)
-            if memory_extracted:
-                print(f"✓ Memory extracted and stored: {memory_extracted.key} = {memory_extracted.value}")
-            else:
-                print("ℹ No memory extracted from this message")
-        except Exception as e:
-            print(f"⚠ Memory extraction error (non-fatal): {e}")
-
+        # --------------------------------------------------------------
+        # A. Retrieve existing memories FIRST (no new extraction yet)
+        # --------------------------------------------------------------
         memory_context = ""
         try:
             memory_context = retrieve_memories(user_message)
             if memory_context:
-                print(f"✓ Using {len(memory_context.split(chr(10)))} memory items in context")
+                print("=== MEMORY CONTEXT USED FOR THIS TURN ===")
+                print(memory_context)
+                print("=== END MEMORY CONTEXT ===")
             else:
                 print("ℹ No memories to include in context")
         except Exception as e:
             print(f"⚠ Memory retrieval error (non-fatal): {e}")
             memory_context = ""
 
-        # Build ONE combined prompt and call Groq
+        # --------------------------------------------------------------
+        # B. Build ONE combined prompt and call Groq
+        #    (LLM only sees existing memories, not newly extracted ones)
+        # --------------------------------------------------------------
         full_prompt = user_message
         if memory_context:
             full_prompt = f"""IMPORTANT CONTEXT ABOUT THE USER (remember and use this information):
@@ -145,6 +144,21 @@ User: {user_message}"""
             reply = generate_response(full_prompt)
         except RuntimeError as e:
             return JSONResponse(status_code=500, content={"error": f"AI service error: {str(e)}"})
+
+        # --------------------------------------------------------------
+        # C. AFTER response is generated, extract any new memory
+        #    so the LLM doesn't see what it just created on this turn.
+        # --------------------------------------------------------------
+        try:
+            memory_extracted = extract_memory(user_message)
+            if memory_extracted:
+                print("=== NEW MEMORY EXTRACTED AFTER RESPONSE ===")
+                print(f"{memory_extracted.key}: {memory_extracted.value} (conf={memory_extracted.confidence:.2f})")
+                print("=== END NEW MEMORY ===")
+            else:
+                print("ℹ No memory extracted from this message")
+        except Exception as e:
+            print(f"⚠ Memory extraction error (non-fatal): {e}")
 
         chat_session.messages.append({
             "role": "user",
