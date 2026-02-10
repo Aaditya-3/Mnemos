@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Test the same loading logic as backend
 project_root = Path(__file__).parent
 env_path = project_root / ".env"
 
@@ -21,10 +20,10 @@ else:
     print("ERROR: .env file not found!")
     print("Run: python setup_env.py")
 
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = os.getenv("GROQ_API_KEY")
 if api_key:
-    print(f"[OK] GEMINI_API_KEY loaded: True")
+    print(f"[OK] GROQ_API_KEY loaded: True")
     print(f"[OK] API key preview: {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else ''}")
 else:
-    print("[ERROR] GEMINI_API_KEY loaded: False")
-    print("  Make sure .env file exists and contains GEMINI_API_KEY=...")
+    print("[ERROR] GROQ_API_KEY loaded: False")
+    print("  Make sure .env file exists and contains GROQ_API_KEY=...")

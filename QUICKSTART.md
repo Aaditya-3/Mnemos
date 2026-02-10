@@ -17,19 +17,19 @@ copy .env.example .env    # Windows
 cp .env.example .env      # Linux/Mac
 ```
 
-**Important:** The `.env.example` already contains an API key. For production, replace it with your own key from https://makersuite.google.com/app/apikey
+**Important:** Set `GROQ_API_KEY` in `.env`. Get your key from https://console.groq.com
 
 ### Step 3: Start Backend (Serves Frontend Too!)
 ```bash
 # From project root directory
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Verify:** You should see:
 ```
 Loaded .env from: C:\temp2\.env
-GEMINI_API_KEY loaded: True
-API key preview: AIzaSyCmnn...
+GROQ_API_KEY loaded: True
+API key preview: gsk_...
 INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
@@ -44,15 +44,15 @@ That's it! The backend serves both the API and the frontend React app.
 ## ✅ Verification Checklist
 
 - [ ] `.env` file exists in project root
-- [ ] Backend shows `GEMINI_API_KEY loaded: True`
+- [ ] Backend shows `GROQ_API_KEY loaded: True`
 - [ ] Backend is running on `http://localhost:8000`
 - [ ] Frontend can connect to backend
-- [ ] Test message gets a response from Gemini
+- [ ] Test message gets a response from Groq
 
-## 🐛 If GEMINI_API_KEY loaded: False
+## 🐛 If GROQ_API_KEY loaded: False
 
 1. Check `.env` file exists: `dir .env` (Windows) or `ls -la .env` (Linux/Mac)
-2. Verify file format: `GEMINI_API_KEY=your_key` (no spaces around `=`)
+2. Verify file format: `GROQ_API_KEY=your_key` (no spaces around `=`)
 3. Ensure you're running from project root (where `requirements.txt` is)
 4. Restart backend after creating/editing `.env`
 

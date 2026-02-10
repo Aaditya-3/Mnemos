@@ -1,7 +1,7 @@
 """
 Memory Extractor
 
-Uses Gemini to extract long-term memories from user messages.
+Uses LLM to extract long-term memories from user messages.
 Only extracts persistent, reusable information.
 """
 
@@ -10,7 +10,7 @@ import re
 from typing import Optional
 from .memory_schema import Memory
 from .memory_store import get_memory_store
-from llm.gemini_client import call_gemini
+from backend.app.core.llm.groq_client import generate_response
 
 
 def _extract_patterns(user_message: str) -> Optional[Memory]:
@@ -108,11 +108,11 @@ If you find ANY extractable information, return the JSON. Only return null if th
 User message: """ + user_message
     
     try:
-        # Call Gemini to extract memory
-        response = call_gemini(prompt)
+        # Call LLM to extract memory
+        response = generate_response(prompt)
         
         if not response:
-            print("Memory extraction: Empty response from Gemini")
+            print("Memory extraction: Empty response from LLM")
             return None
         
         # Clean response - remove markdown code blocks if present
@@ -167,13 +167,13 @@ User message: """ + user_message
         return None
         
     except RuntimeError as e:
-        # API key missing or Gemini API error - log but don't crash
+        # API key missing or Groq API/model error - log but don't crash
         print(f"Memory extraction API error (non-fatal): {e}")
         return None
     except json.JSONDecodeError:
         # Invalid JSON, no memory extracted
         return None
     except Exception as e:
-        # Log error but don't crash
-        print(f"Memory extraction error (non-fatal): {e}")
+        # Log error but don't crash (e.g. network, rate limit, model error)
+        print(f"Memory extraction error (non-fatal): {type(e).__name__}: {e}")
         return None

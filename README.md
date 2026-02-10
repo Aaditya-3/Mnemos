@@ -1,6 +1,6 @@
 # AI Chat System with Long-Term Memory
 
-A complete chat application powered by Google Gemini with persistent memory capabilities. The system remembers user preferences, constraints, and facts across conversations.
+A complete chat application powered by Groq with persistent memory capabilities. The system remembers user preferences, constraints, and facts across conversations.
 
 ## 🏗️ Architecture
 
@@ -15,7 +15,7 @@ Memory Store (persistent)
         ↓
 Memory Retrieval
         ↓
-Gemini LLM
+Groq LLM
         ↓
 Response back to user
 ```
@@ -29,7 +29,7 @@ project_root/
 │   └── app.py                 # FastAPI server
 │
 ├── llm/
-│   └── gemini_client.py       # Gemini API wrapper
+│   └── app/core/llm/groq_client.py   # Groq LLM client
 │
 ├── memory/
 │   ├── memory_schema.py       # Memory data structure
@@ -70,38 +70,38 @@ pip install -r requirements.txt
 
 2. The `.env.example` already contains an example API key. For production, replace it with your own:
    ```
-   GEMINI_API_KEY=your_actual_api_key_here
+   GROQ_API_KEY=your_actual_api_key_here
    ```
 
-   Get your API key from: https://makersuite.google.com/app/apikey
+   Get your API key from: https://console.groq.com
 
 3. **Verify the `.env` file exists** in the project root (same directory as `requirements.txt`)
 
 ### 3. Run Backend
 
-**Important:** Run from the project root directory (where `requirements.txt` is located).
+**Backend MUST be started from project root.** The `.env` file is loaded from the current working directory at startup.
 
-Using uvicorn (recommended):
+From the project root directory (where `requirements.txt` and `.env` are located):
+
 ```bash
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Or using Python directly:
+Or with auto-reload:
 ```bash
-python -m uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The backend will start on `http://localhost:8000`
 
 **Verify Setup:**
-When the backend starts, you should see:
+When the backend starts, you must see:
 ```
-Loaded .env from: C:\temp2\.env
-GEMINI_API_KEY loaded: True
-API key preview: AIzaSyCmnn...
+GROQ_API_KEY loaded: True
 ```
+If you see `GROQ_API_KEY loaded: False`, the `.env` file was not found (wrong directory or missing file).
 
-**If you see `GEMINI_API_KEY loaded: False`:**
+**If you see `GROQ_API_KEY loaded: False`:**
 1. **Create the `.env` file** (if you haven't already):
    ```bash
    python setup_env.py
@@ -109,7 +109,7 @@ API key preview: AIzaSyCmnn...
    ```
 2. **Restart the backend** - The `.env` file is only loaded at startup
 3. Verify the `.env` file exists in the project root (same folder as `requirements.txt`)
-4. Check the file contains `GEMINI_API_KEY=...` (no spaces around `=`)
+4. Check the file contains `GROQ_API_KEY=...` (no spaces around `=`)
 5. Test environment loading: `python test_env.py`
 
 ### 4. Open Frontend
@@ -210,11 +210,11 @@ Health check endpoint.
 - Memory is stored in-memory (single user, single session)
 - For production, consider persistent storage (database)
 - Backend never crashes - all errors returned as JSON
-- Uses `gemini-1.5-flash` model for fast responses
+- Uses Groq `llama-3.1-8b-instant` model for fast responses
 
 ## 🐛 Troubleshooting
 
-### GEMINI_API_KEY loaded: False
+### GROQ_API_KEY loaded: False
 
 **This is the most common issue. Fix it by:**
 
@@ -227,7 +227,7 @@ Health check endpoint.
 
 2. **Check `.env` file format:**
    - Must be in project root (same folder as `requirements.txt`)
-   - Must contain exactly: `GEMINI_API_KEY=your_key_here`
+   - Must contain exactly: `GROQ_API_KEY=your_key_here`
    - No spaces around `=`
    - No quotes around the key
    - No trailing spaces
@@ -242,7 +242,7 @@ Health check endpoint.
 4. **Restart the backend** after creating/editing `.env`
 
 ### Backend won't start:
-- Check that `GEMINI_API_KEY` is set in `.env`
+- Check that `GROQ_API_KEY` is set in `.env`
 - Verify Python dependencies are installed: `pip install -r requirements.txt`
 - Check port 8000 is not in use
 - Ensure you're running from project root directory
@@ -259,7 +259,7 @@ Health check endpoint.
 - Check backend logs for extraction errors (non-fatal errors are logged but don't crash)
 - Memory requires confidence > 0.5 to be retrieved
 
-### Gemini API errors:
+### Groq API errors:
 - Verify your API key is valid
 - Check your internet connection
 - Ensure you have API quota remaining

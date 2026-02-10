@@ -218,7 +218,7 @@ function App() {
                         <h1 className="text-xl font-bold text-white">AI Chat with Memory</h1>
                     </div>
                     <div className="text-sm text-slate-400">
-                        Powered by Google Gemini
+                        Powered by Groq
                     </div>
                 </div>
 

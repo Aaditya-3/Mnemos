@@ -11,12 +11,12 @@ cd c:\temp2
 
 ### Step 2: Start the Server
 ```bash
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Or using Python directly:
 ```bash
-python -m uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Step 3: Open Browser
@@ -64,6 +64,6 @@ A: Yes, change `--port 8000` to your desired port, then update the frontend API_
 **Q: What if I see errors?**  
 A: Make sure:
 - You're in the project root directory (`c:\temp2`)
-- `.env` file exists with `GEMINI_API_KEY=...`
+- `.env` file exists with `GROQ_API_KEY=...`
 - Port 8000 is not already in use
 - All dependencies are installed: `pip install -r requirements.txt`

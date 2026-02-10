@@ -28,7 +28,7 @@ The memory system was forgetting user information and not storing it properly.
 ### 3. **Enhanced Memory Context in Prompts**
 - Memory context is now VERY prominent in prompts
 - Format: "IMPORTANT CONTEXT ABOUT THE USER..."
-- Explicitly instructs Gemini to use the context
+- Explicitly instructs the LLM to use the context
 
 ### 4. **Better Logging**
 - Logs when memories are extracted
