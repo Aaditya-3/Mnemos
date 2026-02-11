@@ -14,13 +14,16 @@ from typing import List, Optional
 from .memory_schema import Memory
 from backend.app.core.db.mongo import get_db
 
+MAX_VALUES_PER_KEY = int(os.getenv("MEMORY_MAX_VALUES_PER_KEY", "3"))
+
 
 class MemoryStore:
     """Persistent memory store (multi-user via user_id)."""
 
     def __init__(self):
         self._memories: dict[str, Memory] = {}
-        self._key_index: dict[tuple[str, str], str] = {}
+        self._key_index: dict[tuple[str, str], set[str]] = {}
+        self._key_value_index: dict[tuple[str, str, str], str] = {}
         self._storage_path = Path(__file__).resolve().parent / "memories.json"
         mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
         if mongo_enabled:
@@ -36,6 +39,7 @@ class MemoryStore:
     def _load(self):
         self._memories = {}
         self._key_index = {}
+        self._key_value_index = {}
         dirty = False
         if self._collection is not None:
             try:
@@ -118,31 +122,48 @@ class MemoryStore:
     def add_or_update_memory(self, memory: Memory) -> Optional[Memory]:
         """
         Add new memory or update existing one.
-
-        Rules:
-        - New memory starts at 0.7
-        - Same key+value confirms (+0.1)
-        - Same key + different value overwrites and resets to 0.7
+        - Exact same key+value reinforces confidence.
+        - For stable/profile or critical memories, key stays single-valued.
+        - For global non-critical categories, retain up to top-N values per key.
         """
         memory = self._normalize_memory(memory)
         if memory is None:
             return None
 
+        self._apply_confidence_policy(memory)
+
+        existing_exact = self._find_by_key_value(memory.key, memory.user_id, memory.value)
+        if existing_exact:
+            existing_exact.confidence = min(1.0, existing_exact.confidence + 0.1)
+            self._apply_confidence_policy(existing_exact)
+            existing_exact.last_updated = datetime.now()
+            self._save()
+            return existing_exact
+
+        if self._should_keep_multiple_values(memory):
+            self._memories[memory.id] = memory
+            self._index_memory(memory)
+            self._enforce_key_bucket_limit(memory.user_id, memory.key, MAX_VALUES_PER_KEY)
+            self._save()
+            return memory
+
         existing = self._find_by_key(memory.key, memory.user_id)
         if existing:
-            if existing.value.lower() == memory.value.lower():
+            old_value = existing.value
+            if old_value.lower() == memory.value.lower():
                 existing.confidence = min(1.0, existing.confidence + 0.1)
             else:
+                self._unindex_memory(existing, value_override=old_value)
                 existing.value = memory.value
                 existing.confidence = 0.7
+                self._index_memory(existing)
             self._apply_confidence_policy(existing)
             existing.last_updated = datetime.now()
             self._save()
             return existing
 
-        self._apply_confidence_policy(memory)
         self._memories[memory.id] = memory
-        self._key_index[(memory.user_id, memory.key.lower())] = memory.id
+        self._index_memory(memory)
         self._save()
         return memory
 
@@ -161,7 +182,7 @@ class MemoryStore:
     def delete_memory(self, memory_id: str) -> bool:
         if memory_id in self._memories:
             memory = self._memories[memory_id]
-            self._key_index.pop((memory.user_id, memory.key.lower()), None)
+            self._unindex_memory(memory)
             del self._memories[memory_id]
             self._save()
             return True
@@ -224,29 +245,105 @@ class MemoryStore:
                     targets.append(target)
         return targets
 
-    def _find_by_key(self, key: str, user_id: str) -> Optional[Memory]:
+    def _normalize_value_for_index(self, value: str) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+    def _index_memory(self, memory: Memory):
+        key_l = (memory.key or "").strip().lower()
+        if not key_l:
+            return
+        bucket_key = (memory.user_id, key_l)
+        bucket = self._key_index.setdefault(bucket_key, set())
+        bucket.add(memory.id)
+        value_l = self._normalize_value_for_index(memory.value)
+        if value_l:
+            self._key_value_index[(memory.user_id, key_l, value_l)] = memory.id
+
+    def _unindex_memory(self, memory: Memory, key_override: Optional[str] = None, value_override: Optional[str] = None):
+        key_l = (key_override or memory.key or "").strip().lower()
+        if not key_l:
+            return
+        bucket_key = (memory.user_id, key_l)
+        bucket = self._key_index.get(bucket_key)
+        if bucket and memory.id in bucket:
+            bucket.remove(memory.id)
+            if not bucket:
+                self._key_index.pop(bucket_key, None)
+        value_l = self._normalize_value_for_index(value_override if value_override is not None else memory.value)
+        kv_key = (memory.user_id, key_l, value_l)
+        if self._key_value_index.get(kv_key) == memory.id:
+            self._key_value_index.pop(kv_key, None)
+
+    def _find_by_key_all(self, key: str, user_id: str) -> List[Memory]:
         key_l = (key or "").strip().lower()
         if not key_l:
+            return []
+        ids = list(self._key_index.get((user_id, key_l), set()))
+        items = [self._memories[m_id] for m_id in ids if m_id in self._memories]
+        if not items:
+            # Fallback rebuild for safety if index drifted.
+            for memory in self._memories.values():
+                if memory.user_id == user_id and memory.key.lower() == key_l:
+                    items.append(memory)
+            if items:
+                self._rebuild_index()
+        return sorted(items, key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)
+
+    def _find_by_key_value(self, key: str, user_id: str, value: str) -> Optional[Memory]:
+        key_l = (key or "").strip().lower()
+        value_l = self._normalize_value_for_index(value)
+        if not key_l or not value_l:
             return None
-        indexed_id = self._key_index.get((user_id, key_l))
-        if indexed_id:
-            memory = self._memories.get(indexed_id)
-            if memory and memory.user_id == user_id and memory.key.lower() == key_l:
+        mem_id = self._key_value_index.get((user_id, key_l, value_l))
+        if mem_id:
+            memory = self._memories.get(mem_id)
+            if memory and memory.user_id == user_id and memory.key.lower() == key_l and self._normalize_value_for_index(memory.value) == value_l:
                 return memory
-            self._key_index.pop((user_id, key_l), None)
-        for memory in self._memories.values():
-            if memory.user_id == user_id and memory.key.lower() == key_l:
-                self._key_index[(user_id, key_l)] = memory.id
+            self._key_value_index.pop((user_id, key_l, value_l), None)
+        for memory in self._find_by_key_all(key_l, user_id):
+            if self._normalize_value_for_index(memory.value) == value_l:
+                self._key_value_index[(user_id, key_l, value_l)] = memory.id
                 return memory
         return None
 
+    def _find_by_key(self, key: str, user_id: str) -> Optional[Memory]:
+        items = self._find_by_key_all(key, user_id)
+        return items[0] if items else None
+
     def _rebuild_index(self):
         self._key_index = {}
+        self._key_value_index = {}
         for memory in self._memories.values():
-            key_l = (memory.key or "").strip().lower()
-            if not key_l:
-                continue
-            self._key_index[(memory.user_id, key_l)] = memory.id
+            self._index_memory(memory)
+
+    def _should_keep_multiple_values(self, memory: Memory) -> bool:
+        if MAX_VALUES_PER_KEY <= 1:
+            return False
+        if memory.type != "preference":
+            return False
+        md = memory.metadata or {}
+        scope = str(md.get("scope", "")).upper()
+        rule_type = str(md.get("rule_type", "")).lower()
+        importance = str(md.get("importance", "")).lower()
+        if scope != "GLOBAL_SCOPE":
+            return False
+        if importance == "critical":
+            return False
+        if rule_type in {"universal", "generic"}:
+            return False
+        if self._is_broad_rule(memory):
+            return False
+        return True
+
+    def _enforce_key_bucket_limit(self, user_id: str, key: str, max_values: int):
+        if max_values <= 0:
+            return
+        items = self._find_by_key_all(key, user_id)
+        if len(items) <= max_values:
+            return
+        for extra in items[max_values:]:
+            self._unindex_memory(extra)
+            self._memories.pop(extra.id, None)
 
     def _is_broad_rule(self, memory: Memory) -> bool:
         md = memory.metadata or {}
@@ -480,6 +577,7 @@ class MemoryStore:
     def clear(self):
         self._memories.clear()
         self._key_index.clear()
+        self._key_value_index.clear()
         self._save()
 
 
@@ -488,4 +586,3 @@ _memory_store = MemoryStore()
 
 def get_memory_store() -> MemoryStore:
     return _memory_store
-

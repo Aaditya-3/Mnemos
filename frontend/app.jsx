@@ -25,19 +25,19 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
     };
 
     return (
-        <div className="min-h-screen bg-[#161B22] text-[#EDE2D2] flex items-center justify-center px-4">
+        <div className="min-h-screen bg-[#161A30] text-[#F0ECE5] flex items-center justify-center px-4">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(148,137,121,0.2),transparent_45%),radial-gradient(circle_at_85%_10%,rgba(223,208,184,0.08),transparent_35%)]" />
             <div className="relative w-full max-w-md bg-[#393E46]/92 border border-[#948979]/45 rounded-3xl p-7 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur">
-                <h1 className="text-2xl font-bold tracking-tight text-[#EDE2D2]">Memory Chat</h1>
+                <h1 className="text-2xl font-bold tracking-tight text-[#F0ECE5]">Memory Chat</h1>
                 <p className="text-[#948979] text-sm mt-1 mb-5">
                     {mode === "login" ? "Sign in to continue" : "Create your account"}
                 </p>
-                <div className="grid grid-cols-2 gap-2 mb-5 bg-[#161B22] border border-[#948979]/40 p-1 rounded-xl">
+                <div className="grid grid-cols-2 gap-2 mb-5 bg-[#161A30] border border-[#948979]/40 p-1 rounded-xl">
                     <button
                         type="button"
                         onClick={() => setMode("login")}
                         className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
-                            mode === "login" ? "bg-[#948979] text-[#161B22]" : "text-[#948979] hover:text-[#EDE2D2]"
+                            mode === "login" ? "bg-[#948979] text-[#161A30]" : "text-[#948979] hover:text-[#F0ECE5]"
                         }`}
                     >
                         Login
@@ -46,7 +46,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                         type="button"
                         onClick={() => setMode("signup")}
                         className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
-                            mode === "signup" ? "bg-[#948979] text-[#161B22]" : "text-[#948979] hover:text-[#EDE2D2]"
+                            mode === "signup" ? "bg-[#948979] text-[#161A30]" : "text-[#948979] hover:text-[#F0ECE5]"
                         }`}
                     >
                         Signup
@@ -59,7 +59,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                         placeholder="Username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="w-full bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
+                        className="w-full bg-[#161A30] border border-[#948979]/45 text-[#F0ECE5] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
                     />
                     <input
                         type="password"
@@ -67,7 +67,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                         placeholder="Password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
+                        className="w-full bg-[#161A30] border border-[#948979]/45 text-[#F0ECE5] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
                     />
                     {error && (
                         <div className="text-sm text-red-200 bg-red-950/40 border border-red-900 rounded-xl px-3 py-2">
@@ -77,7 +77,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-[#948979] hover:bg-[#EDE2D2] disabled:bg-[#393E46] disabled:text-[#948979] text-[#161B22] font-semibold py-3 rounded-xl transition-colors"
+                        className="w-full bg-[#948979] hover:bg-[#F0ECE5] disabled:bg-[#393E46] disabled:text-[#948979] text-[#161A30] font-semibold py-3 rounded-xl transition-colors"
                     >
                         {isLoading ? "Please wait..." : mode === "login" ? "Login" : "Signup"}
                     </button>
@@ -365,14 +365,14 @@ function App() {
     }
 
     return (
-        <div className="flex h-screen bg-[#161B22] text-[#EDE2D2]">
+        <div className="flex h-screen bg-[#161A30] text-[#F0ECE5]">
             <div className="fixed inset-0 bg-[radial-gradient(circle_at_0%_0%,rgba(223,208,184,0.08),transparent_38%),radial-gradient(circle_at_100%_100%,rgba(148,137,121,0.2),transparent_42%)] pointer-events-none" />
 
             <div className={`${sidebarOpen ? "w-72" : "w-0"} relative transition-all duration-500 ease-in-out overflow-hidden bg-[#393E46]/95 border-r border-[#948979]/45 flex flex-col`}>
                 <div className="p-4 border-b border-[#948979]/35">
                     <button
                         onClick={createNewChat}
-                        className="w-full bg-[#EDE2D2] hover:bg-[#DFD0B8] active:scale-[0.99] text-[#161B22] font-semibold py-2.5 px-4 rounded-xl transition-all duration-200 ease-out flex items-center justify-center gap-2"
+                        className="w-full bg-[#F0ECE5] hover:bg-[#DFD0B8] active:scale-[0.99] text-[#161A30] font-semibold py-2.5 px-4 rounded-xl transition-all duration-200 ease-out flex items-center justify-center gap-2"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -389,8 +389,8 @@ function App() {
                                 key={chat.id}
                                 className={`group p-3 mb-2 rounded-xl cursor-pointer transition-all duration-250 ease-out transform-gpu ${
                                     currentChatId === chat.id
-                                        ? "bg-[#EDE2D2] text-[#161B22] shadow-md ring-1 ring-[#EDE2D2]/50 scale-[1.01]"
-                                        : "bg-[#161B22]/80 hover:bg-[#161B22] hover:-translate-y-[1px] text-[#EDE2D2] border border-[#948979]/35"
+                                        ? "bg-[#F0ECE5] text-[#161A30] shadow-md ring-1 ring-[#F0ECE5]/50 scale-[1.01]"
+                                        : "bg-[#161A30]/80 hover:bg-[#161A30] hover:-translate-y-[1px] text-[#F0ECE5] border border-[#948979]/35"
                                 }`}
                                 onClick={() => setCurrentChatId(chat.id)}
                             >
@@ -431,15 +431,15 @@ function App() {
             <div className="flex-1 flex flex-col relative">
                 <div className="bg-[#393E46]/92 border-b border-[#948979]/35 p-4 flex items-center justify-between backdrop-blur">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-[#948979] hover:text-[#EDE2D2] transition-colors duration-200">
+                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-[#948979] hover:text-[#F0ECE5] transition-colors duration-200">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
-                        <h1 className="text-xl font-semibold tracking-tight text-[#EDE2D2]">Memory Chat</h1>
+                        <h1 className="text-xl font-semibold tracking-tight text-[#F0ECE5]">Memory Chat</h1>
                         <span className="text-xs text-[#948979]">User: {userId}</span>
                     </div>
-                    <button onClick={logout} className="text-sm bg-[#161B22] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#EDE2D2] px-3 py-1.5 rounded-lg transition-all duration-200">
+                    <button onClick={logout} className="text-sm bg-[#161A30] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#F0ECE5] px-3 py-1.5 rounded-lg transition-all duration-200">
                         Logout
                     </button>
                 </div>
@@ -449,7 +449,7 @@ function App() {
                         <div className="flex items-center justify-center h-full">
                             <div className="max-w-2xl w-full rounded-2xl border border-[#948979]/45 bg-[#393E46]/88 px-6 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
                                 <p className="text-xs uppercase tracking-[0.18em] text-[#948979] mb-2">Assistant</p>
-                                <p className="text-lg leading-relaxed text-[#EDE2D2]">
+                                <p className="text-lg leading-relaxed text-[#F0ECE5]">
                                     <TypewriterText text={WELCOME_MESSAGE} speed={16} active={showAnimatedWelcome} />
                                 </p>
                                 <p className="text-sm text-[#948979] mt-3">Start by sharing anything you want me to remember.</p>
@@ -462,8 +462,8 @@ function App() {
                                     <div
                                         className={`max-w-[85%] rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
                                             msg.role === "user"
-                                                ? "bg-[#EDE2D2] text-[#161B22]"
-                                                : "bg-[#393E46] text-[#EDE2D2] border border-[#948979]/35"
+                                                ? "bg-[#F0ECE5] text-[#161A30]"
+                                                : "bg-[#31304D] text-[#F0ECE5] border border-[#948979]/35"
                                         }`}
                                     >
                                         <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
@@ -472,7 +472,7 @@ function App() {
                             ))}
                             {isWaitingResponse && (
                                 <div className="flex justify-start">
-                                    <div className="bg-[#393E46] border border-[#948979]/35 rounded-2xl px-4 py-2 text-[#948979] text-sm">
+                                    <div className="bg-[#31304D] border border-[#948979]/35 rounded-2xl px-4 py-2 text-[#948979] text-sm">
                                         Thinking...
                                     </div>
                                 </div>
@@ -492,12 +492,12 @@ function App() {
                             rows={1}
                             placeholder="Type your message..."
                             disabled={isLoading}
-                            className="flex-1 min-h-[48px] max-h-[180px] resize-none bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979] transition-all duration-200 disabled:opacity-50 custom-scrollbar"
+                            className="flex-1 min-h-[48px] max-h-[180px] resize-none bg-[#161A30] border border-[#948979]/45 text-[#F0ECE5] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979] transition-all duration-200 disabled:opacity-50 custom-scrollbar"
                         />
                         <button
                             onClick={sendMessage}
                             disabled={isLoading || !inputMessage.trim()}
-                            className="bg-[#948979] hover:bg-[#EDE2D2] active:scale-[0.99] disabled:bg-[#393E46] disabled:text-[#948979] disabled:cursor-not-allowed text-[#161B22] font-semibold px-6 py-3 rounded-xl transition-all duration-200"
+                            className="bg-[#948979] hover:bg-[#F0ECE5] active:scale-[0.99] disabled:bg-[#393E46] disabled:text-[#948979] disabled:cursor-not-allowed text-[#161A30] font-semibold px-6 py-3 rounded-xl transition-all duration-200"
                         >
                             {isLoading ? "Sending..." : "Send"}
                         </button>
@@ -508,14 +508,14 @@ function App() {
             {deleteConfirmChatId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm fade-in">
                     <div className="w-full max-w-sm rounded-2xl border border-[#948979]/45 bg-[#393E46] p-5 shadow-2xl soft-pop">
-                        <h3 className="text-lg font-semibold text-[#EDE2D2]">Delete Chat?</h3>
+                        <h3 className="text-lg font-semibold text-[#F0ECE5]">Delete Chat?</h3>
                         <p className="mt-2 text-sm text-[#948979]">
                             This will permanently remove this chat from your sidebar.
                         </p>
                         <div className="mt-5 flex justify-end gap-2">
                             <button
                                 onClick={() => setDeleteConfirmChatId(null)}
-                                className="rounded-lg border border-[#948979]/40 bg-[#161B22] px-4 py-2 text-sm text-[#EDE2D2] transition-colors hover:bg-[#393E46]"
+                                className="rounded-lg border border-[#948979]/40 bg-[#161A30] px-4 py-2 text-sm text-[#F0ECE5] transition-colors hover:bg-[#393E46]"
                             >
                                 Cancel
                             </button>

@@ -195,5 +195,22 @@
     },
     "created_at": "2026-02-11T12:33:42.841767",
     "last_updated": "2026-02-11T12:33:42.841767"
+  },
+  {
+    "id": "8a39b2d0-4abd-43b1-9e72-b3491a242afe",
+    "user_id": "aaditya_03",
+    "type": "constraint",
+    "key": "custom.critical.like_boobs_girl",
+    "value": "that i like boobs in a girl",
+    "confidence": 0.9,
+    "metadata": {
+      "domain": "critical_context",
+      "category": "like_boobs_girl",
+      "scope": "GLOBAL_SCOPE",
+      "importance": "critical",
+      "source": "explicit_user_instruction"
+    },
+    "created_at": "2026-02-11T16:55:29.208834",
+    "last_updated": "2026-02-11T16:55:29.208834"
   }
 ]

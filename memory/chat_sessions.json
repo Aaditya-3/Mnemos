@@ -776,7 +776,7 @@
     "user_id": "aaditya_03",
     "title": "New Chat",
     "created_at": "2026-02-11T14:09:16.664413",
-    "updated_at": "2026-02-11T14:09:24.771687",
+    "updated_at": "2026-02-11T17:46:01.848181",
     "messages": [
       {
         "role": "user",
@@ -787,6 +787,195 @@
         "role": "assistant",
         "content": "Aaditya! It's great to chat with you. How's your day going so far?",
         "timestamp": "2026-02-11T14:09:28.424821"
+      },
+      {
+        "role": "user",
+        "content": "which is my fav food",
+        "timestamp": "2026-02-11T16:34:21.175967"
+      },
+      {
+        "role": "assistant",
+        "content": "Your Food preference is pizza.",
+        "timestamp": "2026-02-11T16:34:21.175967"
+      },
+      {
+        "role": "user",
+        "content": "which is my fav drink",
+        "timestamp": "2026-02-11T16:34:29.529272"
+      },
+      {
+        "role": "assistant",
+        "content": "Your Drink preference is Coca Cola.",
+        "timestamp": "2026-02-11T16:34:29.529272"
+      },
+      {
+        "role": "user",
+        "content": "i like boobs in a girl",
+        "timestamp": "2026-02-11T16:48:26.916941"
+      },
+      {
+        "role": "assistant",
+        "content": "It seems like you have a certain preference when it comes to physical attributes in a girl.",
+        "timestamp": "2026-02-11T16:48:26.916941"
+      },
+      {
+        "role": "user",
+        "content": "what is my preference about physical aspects in a girl",
+        "timestamp": "2026-02-11T16:53:55.335826"
+      },
+      {
+        "role": "assistant",
+        "content": "Top 3 preferences in your profile:\n1. entertainment.character_exception.jjk: gojo (confidence 0.80)\n2. lifestyle.drinks: Coca Cola (confidence 0.80)\n3. lifestyle.food: pizza (confidence 0.70)",
+        "timestamp": "2026-02-11T16:53:55.335826"
+      },
+      {
+        "role": "user",
+        "content": "remember that i like boobs in a girl",
+        "timestamp": "2026-02-11T16:55:29.208834"
+      },
+      {
+        "role": "assistant",
+        "content": "You've mentioned your preference for physical attributes in a girl before. Your top preference is actually not explicitly mentioned in our previous conversation, but based on your interest in the anime character Gojo, it seems you might have a preference for certain physical characteristics in a girl.",
+        "timestamp": "2026-02-11T16:55:29.208834"
+      },
+      {
+        "role": "user",
+        "content": "what is my preference about physical aspects in a girl",
+        "timestamp": "2026-02-11T16:55:46.979334"
+      },
+      {
+        "role": "assistant",
+        "content": "Top 3 preferences in your profile:\n1. entertainment.character_exception.jjk: gojo (confidence 0.80)\n2. lifestyle.drinks: Coca Cola (confidence 0.80)\n3. lifestyle.food: pizza (confidence 0.70)",
+        "timestamp": "2026-02-11T16:55:46.979334"
+      },
+      {
+        "role": "user",
+        "content": "what do i like in girls",
+        "timestamp": "2026-02-11T16:57:02.359530"
+      },
+      {
+        "role": "assistant",
+        "content": "Based on our previous conversations, it seems you have a certain preference when it comes to physical attributes in a girl. Your top preference is actually not explicitly mentioned in our previous conversation, but based on your interest in the anime character Gojo, it seems you might have a preference for certain physical characteristics in a girl.",
+        "timestamp": "2026-02-11T16:57:02.359530"
+      },
+      {
+        "role": "user",
+        "content": "hello",
+        "timestamp": "2026-02-11T17:05:38.521873"
+      },
+      {
+        "role": "assistant",
+        "content": "Aaditya! It's great to chat with you again. How's your day going so far?",
+        "timestamp": "2026-02-11T17:05:38.521873"
+      },
+      {
+        "role": "user",
+        "content": "what do i like in girls",
+        "timestamp": "2026-02-11T17:05:51.955085"
+      },
+      {
+        "role": "assistant",
+        "content": "You're doing well, considering your upcoming test and class.",
+        "timestamp": "2026-02-11T17:05:51.955085"
+      },
+      {
+        "role": "user",
+        "content": "what is my fav drink",
+        "timestamp": "2026-02-11T17:06:02.103534"
+      },
+      {
+        "role": "assistant",
+        "content": "Your Drink preference is Coca Cola.",
+        "timestamp": "2026-02-11T17:06:02.103534"
+      },
+      {
+        "role": "user",
+        "content": "what do i like in girls",
+        "timestamp": "2026-02-11T17:37:42.788509"
+      },
+      {
+        "role": "assistant",
+        "content": "You've mentioned your preference for physical attributes in a girl before. However, I don't have a specific preference stored for that topic yet.",
+        "timestamp": "2026-02-11T17:37:42.788509"
+      },
+      {
+        "role": "user",
+        "content": "i like boobs in a girl",
+        "timestamp": "2026-02-11T17:37:54.412059"
+      },
+      {
+        "role": "assistant",
+        "content": "You've mentioned your preference for physical attributes in a girl before. Your top preference is actually not explicitly mentioned in our previous conversation, but based on your interest in the anime character Gojo, it seems you might have a preference for certain physical characteristics in a girl.",
+        "timestamp": "2026-02-11T17:37:54.412059"
+      },
+      {
+        "role": "user",
+        "content": "where do i study",
+        "timestamp": "2026-02-11T17:45:43.333506"
+      },
+      {
+        "role": "assistant",
+        "content": "You study at IIIT Lucknow.",
+        "timestamp": "2026-02-11T17:45:43.333506"
+      },
+      {
+        "role": "user",
+        "content": "in which yead",
+        "timestamp": "2026-02-11T17:45:52.414696"
+      },
+      {
+        "role": "assistant",
+        "content": "I think you meant to ask \"in which year\". You study in the 2nd year at IIIT Lucknow.",
+        "timestamp": "2026-02-11T17:45:52.414696"
+      },
+      {
+        "role": "user",
+        "content": "what do i like in girls",
+        "timestamp": "2026-02-11T17:46:12.102538"
+      },
+      {
+        "role": "assistant",
+        "content": "You've mentioned your preference for physical attributes in a girl before, specifically liking boobs in a girl. However, I don't have a specific preference stored for that topic yet.",
+        "timestamp": "2026-02-11T17:46:12.102538"
+      }
+    ]
+  },
+  {
+    "id": "865f2f30-6dca-438f-a750-addaa438780b",
+    "user_id": "aaditya_03",
+    "title": "New Chat",
+    "created_at": "2026-02-11T16:48:42.916769",
+    "updated_at": "2026-02-11T16:49:33.741302",
+    "messages": [
+      {
+        "role": "user",
+        "content": "what do i like in a girl",
+        "timestamp": "2026-02-11T16:48:58.078038"
+      },
+      {
+        "role": "assistant",
+        "content": "It seems you're looking for someone with a strong personality, much like your favorite anime characters. You've mentioned that your favorite anime character is the main character (MC) of all the animes, but there's an exception for JJK, where your preference is Gojo.",
+        "timestamp": "2026-02-11T16:48:58.078038"
+      },
+      {
+        "role": "user",
+        "content": "what is my preferrence about physical apects",
+        "timestamp": "2026-02-11T16:49:19.205282"
+      },
+      {
+        "role": "assistant",
+        "content": "It seems you're looking for someone with a strong personality, but you haven't explicitly mentioned your preferences for physical aspects. However, considering your favorite anime character is the main character (MC) of all the animes, I'd say you might appreciate someone with a fit and athletic build, similar to the typical depiction of anime protagonists.",
+        "timestamp": "2026-02-11T16:49:19.205282"
+      },
+      {
+        "role": "user",
+        "content": "what is my preferrence about physical aspects in a girl",
+        "timestamp": "2026-02-11T16:49:36.980174"
+      },
+      {
+        "role": "assistant",
+        "content": "It seems you're looking for someone with a fit and athletic build, similar to the typical depiction of anime protagonists. This is an inference based on your favorite anime character being the main character (MC) of all the animes.",
+        "timestamp": "2026-02-11T16:49:36.980174"
       }
     ]
   }

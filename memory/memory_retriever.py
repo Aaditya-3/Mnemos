@@ -41,17 +41,53 @@ CRITICAL_MARKERS = {
 
 MAX_CANDIDATES = int(os.getenv("MEMORY_RETRIEVER_MAX_CANDIDATES", "80"))
 MAX_SELECTED = int(os.getenv("MEMORY_RETRIEVER_MAX_SELECTED", "12"))
+GENERIC_QUERY_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "to", "of", "in", "on", "for", "and", "or", "but", "with", "about",
+    "what", "which", "who", "when", "where", "why", "how",
+    "do", "does", "did", "can", "could", "would", "should",
+    "my", "me", "i", "your", "you", "it", "that", "this", "there",
+    "please", "tell", "show", "list", "give", "have",
+}
 
 
 def _is_critical_memory(memory) -> bool:
     md = memory.metadata or {}
     key_l = (memory.key or "").lower()
     domain = str(md.get("domain", "")).lower()
-    importance = str(md.get("importance", "")).lower()
     return (
         domain == "critical_context"
-        or importance == "critical"
         or key_l.startswith("custom.critical.")
+    )
+
+
+def _semantic_tokens(tokens: set[str]) -> set[str]:
+    return {t for t in tokens if len(t) > 2 and t not in GENERIC_QUERY_STOPWORDS}
+
+
+def _memory_tokens(memory) -> set[str]:
+    md = memory.metadata or {}
+    raw = " ".join(
+        [
+            str(memory.key or ""),
+            str(memory.value or ""),
+            str(md.get("domain", "") or ""),
+            str(md.get("category", "") or ""),
+            str(md.get("subject", "") or ""),
+        ]
+    ).lower()
+    return set(re.findall(r"[a-z0-9]+", raw))
+
+
+def _is_broad_rule(memory) -> bool:
+    md = memory.metadata or {}
+    scope = str(md.get("scope", "")).upper()
+    rule_type = str(md.get("rule_type", "")).lower()
+    key_l = (memory.key or "").lower()
+    return (
+        (scope == "GLOBAL_SCOPE" and rule_type in {"universal", "generic"})
+        or key_l == "entertainment.global_character_rule"
+        or key_l.startswith("custom.preference_rule.")
     )
 
 
@@ -71,6 +107,7 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
     
     msg_l = (user_message or "").lower()
     msg_tokens = set(re.findall(r"[a-z0-9]+", msg_l))
+    semantic_tokens = _semantic_tokens(msg_tokens)
     entity = _extract_query_entity(msg_l)
     query_domain, query_category = _infer_query_context(msg_tokens)
     query_is_critical = bool(CRITICAL_MARKERS.intersection(msg_tokens))
@@ -95,6 +132,16 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
             continue
         if entity and scope == "LOCAL_SCOPE" and subject and subject != entity and not is_critical:
             continue
+
+        if not query_domain and semantic_tokens and not is_critical:
+            mem_tokens = _memory_tokens(m)
+            overlap_semantic = len(semantic_tokens.intersection(mem_tokens))
+            if overlap_semantic == 0:
+                continue
+            # Global broad rules must be strongly tied to current query terms.
+            if _is_broad_rule(m) and overlap_semantic < 2:
+                continue
+
         scoped.append(m)
 
     if not scoped:
@@ -235,7 +282,9 @@ def _extract_query_entity(message_l: str) -> str:
 
 def _infer_query_context(msg_tokens: set[str]) -> tuple[str, str]:
     # Returns (domain, category)
-    if {"name", "college", "year", "identity", "who", "am", "i"}.intersection(msg_tokens):
+    if {"name", "college", "year", "identity"}.intersection(msg_tokens):
+        return "identity", ""
+    if {"who", "am", "i"}.issubset(msg_tokens):
         return "identity", ""
     if {"food", "drink", "drinks", "gym", "lifestyle", "eat"}.intersection(msg_tokens):
         if {"food", "eat"}.intersection(msg_tokens):

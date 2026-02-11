@@ -42,15 +42,25 @@ from backend.app.core.db.mongo import get_db
 from backend.app.core.tools.preference_reasoning import (
     parse_preference_query,
     classify_memory_for_query,
-    external_reasoning_hint,
-    resolve_external_guess,
-    resolve_rule_with_model,
 )
 
 project_root = _project_root
 api_key_loaded = bool(os.getenv("GROQ_API_KEY"))
 realtime_web_enabled = os.getenv("ENABLE_REALTIME_WEB", "true").strip().lower() in {"1", "true", "yes", "on"}
 mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
+SEMANTIC_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "to", "of", "in", "on", "for", "and", "or", "but", "with", "about",
+    "what", "which", "who", "when", "where", "why", "how",
+    "do", "does", "did", "can", "could", "would", "should", "will",
+    "my", "me", "i", "your", "you", "it", "that", "this", "there",
+    "tell", "show", "list", "please", "have",
+}
+SCHEDULE_MARKERS = {
+    "schedule", "class", "classes", "test", "exam", "deadline", "event",
+    "upcoming", "tomorrow", "today", "important", "date", "day",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+}
 if not api_key_loaded:
     print("WARNING: GROQ_API_KEY not found. Create .env in project root and set GROQ_API_KEY=...")
 
@@ -88,6 +98,25 @@ def _normalize_text_for_compare(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+def _semantic_tokens(text: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+    return {t for t in tokens if len(t) > 2 and t not in SEMANTIC_STOPWORDS}
+
+
+def _is_schedule_intent_message(message: str) -> bool:
+    msg_l = (message or "").lower().strip()
+    if not msg_l:
+        return False
+    msg_tokens = set(re.findall(r"[a-z0-9]+", msg_l))
+    if _extract_day_reference(msg_l):
+        return True
+    if SCHEDULE_MARKERS.intersection(msg_tokens):
+        return True
+    if re.search(r"\bwhen\s+is\b", msg_l) and {"class", "test", "exam", "event", "schedule"}.intersection(msg_tokens):
+        return True
+    return False
+
+
 def _last_assistant_reply(chat_session: "ChatSession") -> str:
     for msg in reversed(chat_session.messages):
         if str(msg.get("role", "")).lower() == "assistant":
@@ -115,6 +144,26 @@ def _is_repetitive_reply(reply: str, chat_session: "ChatSession") -> bool:
             return True
         if len(cand) > 40 and SequenceMatcher(None, cand, prev).ratio() >= 0.95:
             return True
+    return False
+
+
+def _is_irrelevant_reply(user_message: str, reply: str) -> bool:
+    user_sem = _semantic_tokens(user_message)
+    reply_sem = _semantic_tokens(reply)
+    if not reply_sem:
+        return False
+
+    # Reject schedule-like answers for non-schedule questions.
+    if not _is_schedule_intent_message(user_message):
+        schedule_overlap = len(reply_sem.intersection(SCHEDULE_MARKERS))
+        if schedule_overlap >= 2:
+            return True
+
+    if user_sem:
+        overlap = len(user_sem.intersection(reply_sem))
+        if overlap == 0 and len(reply.split()) >= 10:
+            return True
+
     return False
 
 
@@ -175,6 +224,7 @@ MAX_USER_CHAT_TOKENS = int(os.getenv("MAX_USER_CHAT_TOKENS", "130000"))
 CHAT_HISTORY_MAX_TOKENS = int(os.getenv("CHAT_HISTORY_MAX_TOKENS", "3200"))
 CHAT_HISTORY_MAX_MESSAGES = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "40"))
 LONG_TERM_PROFILE_MAX_ITEMS = int(os.getenv("LONG_TERM_PROFILE_MAX_ITEMS", "40"))
+SESSION_TEMP_FACTS_MAX_ITEMS = int(os.getenv("SESSION_TEMP_FACTS_MAX_ITEMS", "14"))
 
 if mongo_enabled:
     try:
@@ -231,7 +281,7 @@ def _trim_chat_to_budget(session: ChatSession, token_budget: int):
         session.messages.pop(0)
 
 
-def _build_long_term_profile(user_id: str, max_items: int = LONG_TERM_PROFILE_MAX_ITEMS) -> str:
+def _build_long_term_profile(user_id: str, query_message: str = "", max_items: int = LONG_TERM_PROFILE_MAX_ITEMS) -> str:
     """
     Build a compact long-term profile snapshot from persisted user memories.
     """
@@ -245,7 +295,7 @@ def _build_long_term_profile(user_id: str, max_items: int = LONG_TERM_PROFILE_MA
 
     def _is_critical(memory) -> bool:
         md = memory.metadata or {}
-        return str(md.get("importance", "")).lower() == "critical" or str(md.get("domain", "")).lower() == "critical_context"
+        return str(md.get("domain", "")).lower() == "critical_context"
 
     def _is_profile(memory) -> bool:
         md = memory.metadata or {}
@@ -266,6 +316,38 @@ def _build_long_term_profile(user_id: str, max_items: int = LONG_TERM_PROFILE_MA
     profile = sorted([m for m in memories if _is_profile(m)], key=_sort_key, reverse=True)
     global_rules = sorted([m for m in memories if _is_global_rule(m)], key=_sort_key, reverse=True)
     recent = sorted(memories, key=_sort_key, reverse=True)
+
+    query_tokens = _semantic_tokens(query_message)
+
+    def _memory_tokens(memory) -> set[str]:
+        md = memory.metadata or {}
+        raw = " ".join(
+            [
+                str(memory.key or ""),
+                str(memory.value or ""),
+                str(md.get("domain", "") or ""),
+                str(md.get("category", "") or ""),
+                str(md.get("subject", "") or ""),
+            ]
+        ).lower()
+        return set(re.findall(r"[a-z0-9]+", raw))
+
+    def _is_query_relevant(memory) -> bool:
+        if _is_critical(memory) or _is_profile(memory):
+            return True
+        if not query_tokens:
+            return True
+        overlap = len(query_tokens.intersection(_memory_tokens(memory)))
+        if overlap == 0:
+            return False
+        if _is_global_rule(memory) and overlap < 2:
+            return False
+        return True
+
+    critical = [m for m in critical if _is_query_relevant(m)]
+    profile = [m for m in profile if _is_query_relevant(m)]
+    global_rules = [m for m in global_rules if _is_query_relevant(m)]
+    recent = [m for m in recent if _is_query_relevant(m)]
 
     selected = []
     selected_ids = set()
@@ -334,6 +416,49 @@ def _build_chat_history_context(chat_session: ChatSession, max_messages: int = C
 
     budgeted_lines.reverse()
     return "\n".join(budgeted_lines)
+
+
+def _build_session_temp_facts(chat_session: ChatSession, max_items: int = SESSION_TEMP_FACTS_MAX_ITEMS) -> str:
+    """
+    Build temporary chat-scoped user facts from this session only.
+    Captures recent declarative user statements to strengthen follow-up continuity
+    without polluting long-term memory.
+    """
+    if not chat_session.messages:
+        return ""
+
+    question_starters = {
+        "what", "which", "who", "when", "where", "why", "how",
+        "do", "does", "did", "can", "could", "would", "should",
+        "is", "are", "am", "will",
+    }
+    seen = set()
+    items = []
+    for msg in reversed(chat_session.messages):
+        if str(msg.get("role", "")).lower() != "user":
+            continue
+        content = re.sub(r"\s+", " ", str(msg.get("content", "")).strip())
+        if not content:
+            continue
+        lower = content.lower()
+        first = re.findall(r"[a-z]+", lower)
+        first_token = first[0] if first else ""
+        is_question_like = ("?" in content) or (first_token in question_starters)
+        if is_question_like:
+            continue
+        norm = lower.strip(" .!?")
+        if len(norm) < 4 or norm in seen:
+            continue
+        seen.add(norm)
+        items.append(content)
+        if len(items) >= max_items:
+            break
+
+    if not items:
+        return ""
+
+    items.reverse()
+    return "\n".join(f"- {item}" for item in items)
 
 
 def _latest_entity_from_chat_history(chat_session: ChatSession, max_messages: int = 14) -> str:
@@ -507,6 +632,8 @@ def handle_schedule_query(user_message: str, user_id: str) -> Optional[str]:
     msg_l = (user_message or "").lower().strip()
     if not msg_l:
         return None
+    if not _is_schedule_intent_message(msg_l):
+        return None
 
     store = get_memory_store()
     memories = [
@@ -575,7 +702,7 @@ def handle_schedule_query(user_message: str, user_id: str) -> Optional[str]:
         day_query
         or asks_when
         or {"important", "schedule"}.intersection(msg_tokens)
-        or msg_l.startswith(("do ", "have ", "what ", "which ", "tell "))
+        or {"class", "classes", "test", "exam", "event", "upcoming", "deadline"}.intersection(msg_tokens)
     )
     if generic_intent and latest:
         event_label, day = next(iter(latest.items()))
@@ -682,26 +809,89 @@ def detect_category_query(user_message: str) -> Optional[str]:
     if not is_query:
         return None
 
+    asks_top3 = ("top 3" in msg or "top3" in msg) and any(
+        marker in msg for marker in ["category", "categories", "each", "every", "per"]
+    )
+
     if any(p in msg for p in ["my preferences", "my preference", "preferences do i have", "all preferences"]):
-        return "preference"
+        return "preference_by_category" if asks_top3 else "preference"
     if any(p in msg for p in ["my facts", "facts about me", "all facts", "my profile facts"]):
-        return "fact"
+        return "fact_by_category" if asks_top3 else "fact"
     if any(p in msg for p in ["my constraints", "all constraints", "constraints i have"]):
-        return "constraint"
+        return "constraint_by_category" if asks_top3 else "constraint"
+    if asks_top3:
+        return "all_by_category"
     return None
 
 
 def build_category_top3_reply(user_id: str, category: str) -> str:
     store = get_memory_store()
-    items = [m for m in store.get_user_memories(user_id) if m.type == category]
-    items = sorted(items, key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)[:3]
-    if not items:
-        return f"I do not have any stored {category}s for you yet."
+    type_filter = category
+    by_category = False
+    if category.endswith("_by_category"):
+        by_category = True
+        type_filter = category.replace("_by_category", "")
+    elif category in {"preference", "fact", "constraint"}:
+        # Default to per-category view for category queries.
+        by_category = True
 
-    label = {"preference": "preferences", "fact": "facts", "constraint": "constraints"}[category]
-    lines = [f"Top 3 {label} in your profile:"]
-    for idx, m in enumerate(items, start=1):
-        lines.append(f"{idx}. {m.key}: {m.value} (confidence {m.confidence:.2f})")
+    memories = store.get_user_memories(user_id)
+    if type_filter == "all":
+        items = [m for m in memories if m.confidence >= 0.5]
+    else:
+        items = [m for m in memories if m.type == type_filter and m.confidence >= 0.5]
+
+    if not items:
+        label = "entries" if type_filter == "all" else f"{type_filter}s"
+        return f"I do not have any stored {label} for you yet."
+
+    if not by_category:
+        top = sorted(items, key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)[:3]
+        label = {"preference": "preferences", "fact": "facts", "constraint": "constraints", "all": "entries"}.get(type_filter, "entries")
+        lines = [f"Top 3 {label} in your profile:"]
+        for idx, m in enumerate(top, start=1):
+            lines.append(f"{idx}. {m.key}: {m.value} (confidence {m.confidence:.2f})")
+        return "\n".join(lines)
+
+    grouped: dict[str, list] = {}
+    for m in items:
+        md = m.metadata or {}
+        domain = str(md.get("domain") or "").strip().lower()
+        cat = str(md.get("category") or "").strip().lower()
+        group_key = f"{domain}.{cat}" if domain and cat else m.key
+        grouped.setdefault(group_key, []).append(m)
+
+    def _top_values(group_items: list) -> list:
+        sorted_items = sorted(group_items, key=lambda x: (x.confidence, x.last_updated.timestamp()), reverse=True)
+        seen_values = set()
+        top_items = []
+        for item in sorted_items:
+            v = (item.value or "").strip().lower()
+            if not v or v in seen_values:
+                continue
+            seen_values.add(v)
+            top_items.append(item)
+            if len(top_items) >= 3:
+                break
+        return top_items
+
+    group_rows = []
+    for group_key, group_items in grouped.items():
+        top_items = _top_values(group_items)
+        if not top_items:
+            continue
+        latest_ts = max(i.last_updated.timestamp() for i in top_items)
+        value_text = ", ".join(f"{i.value} ({i.confidence:.2f})" for i in top_items)
+        group_rows.append((latest_ts, f"{group_key}: {value_text}"))
+
+    if not group_rows:
+        return "I do not have enough categorized information yet."
+
+    group_rows.sort(key=lambda x: x[0], reverse=True)
+    label = {"preference": "preferences", "fact": "facts", "constraint": "constraints", "all": "memory entries"}.get(type_filter, "entries")
+    lines = [f"Top 3 values per category for your {label}:"]
+    for idx, (_, text) in enumerate(group_rows, start=1):
+        lines.append(f"{idx}. {text}")
     return "\n".join(lines)
 
 
@@ -749,21 +939,11 @@ def handle_preference_query(user_message: str, user_id: str) -> Optional[str]:
     if specific_values:
         return f"Your {subject_title} preference is {specific_values[0]}."
 
-    # Second path: infer from stored global rule.
-    inferred = None
-    if global_values and entity_key:
-        model_guess = resolve_rule_with_model(subject_label, entity_key, global_values)
-        external_guess = resolve_external_guess(subject_label, entity_key, global_values)
-        inferred = model_guess or external_guess
-
-    if entity_title and inferred:
-        return f"For {subject_title} in {entity_title}, the best match is {inferred}."
-
     # Keep broad profile answer if user asked generally (no entity requested).
     if global_values and not entity_title:
         return f"Your broader {subject_title} preference rule is {global_values[0]}."
 
-    # Weak evidence: defer to main LLM flow instead of forcing a DB-only fallback sentence.
+    # Weak evidence: no direct stored match for this preference query.
     return None
 
 
@@ -850,85 +1030,29 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
 
         # Resolve short acknowledgements after chat context is known.
         resolved_user_message = _resolve_short_reply_context(user_message, chat_session)
+        continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
         is_ack_reply = _is_short_acknowledgement(user_message)
 
         # --------------------------------------------------------------
         # A. Handle explicit category-profile queries (top 3)
         # --------------------------------------------------------------
-        category_query = None if is_ack_reply else detect_category_query(resolved_user_message)
-        if category_query:
-            reply = build_category_top3_reply(user_id, category_query)
-            chat_session.messages.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": datetime.now().isoformat()
-            })
-            chat_session.messages.append({
-                "role": "assistant",
-                "content": reply,
-                "timestamp": datetime.now().isoformat()
-            })
-            _persist_chat_session(chat_session)
-            enforce_user_chat_token_budget(user_id)
-            return ChatResponse(reply=reply, chat_id=chat_id)
+        category_query = None if is_ack_reply else detect_category_query(continuity_message)
+        category_hint = build_category_top3_reply(user_id, category_query) if category_query else None
 
         # --------------------------------------------------------------
         # A2. Deterministic realtime answer for date/time style queries
         # --------------------------------------------------------------
-        builtin_realtime_reply = None if is_ack_reply else handle_builtin_realtime_query(resolved_user_message)
-        if builtin_realtime_reply:
-            chat_session.messages.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": datetime.now().isoformat()
-            })
-            chat_session.messages.append({
-                "role": "assistant",
-                "content": builtin_realtime_reply,
-                "timestamp": datetime.now().isoformat()
-            })
-            _persist_chat_session(chat_session)
-            enforce_user_chat_token_budget(user_id)
-            return ChatResponse(reply=builtin_realtime_reply, chat_id=chat_id)
+        builtin_realtime_hint = None if is_ack_reply else handle_builtin_realtime_query(continuity_message)
 
         # --------------------------------------------------------------
         # A2b. Deterministic schedule answer (tests/classes + day)
         # --------------------------------------------------------------
-        schedule_reply = None if is_ack_reply else handle_schedule_query(resolved_user_message, user_id)
-        if schedule_reply:
-            chat_session.messages.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": datetime.now().isoformat()
-            })
-            chat_session.messages.append({
-                "role": "assistant",
-                "content": schedule_reply,
-                "timestamp": datetime.now().isoformat()
-            })
-            _persist_chat_session(chat_session)
-            enforce_user_chat_token_budget(user_id)
-            return ChatResponse(reply=schedule_reply, chat_id=chat_id)
+        schedule_hint = None if is_ack_reply else handle_schedule_query(continuity_message, user_id)
 
         # --------------------------------------------------------------
         # A3. Deterministic preference reasoning (domain-agnostic)
         # --------------------------------------------------------------
-        continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
-        preference_reply = None if is_ack_reply else handle_preference_query(continuity_message, user_id)
-        if preference_reply:
-            chat_session.messages.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": datetime.now().isoformat()
-            })
-            chat_session.messages.append({
-                "role": "assistant",
-                "content": preference_reply,
-                "timestamp": datetime.now().isoformat()
-            })
-            _persist_chat_session(chat_session)
-            enforce_user_chat_token_budget(user_id)
-            return ChatResponse(reply=preference_reply, chat_id=chat_id)
+        preference_hint = None if is_ack_reply else handle_preference_query(continuity_message, user_id)
 
         # --------------------------------------------------------------
         # B. Retrieve existing memories FIRST (no new extraction yet)
@@ -946,8 +1070,11 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
             print(f"WARNING: Memory retrieval error (non-fatal): {e}")
             memory_context = ""
 
-        long_term_profile = _build_long_term_profile(user_id)
+        long_term_profile = _build_long_term_profile(user_id, query_message=continuity_message)
         chat_history_context = _build_chat_history_context(chat_session)
+        session_temp_facts = _build_session_temp_facts(chat_session)
+        deterministic_hints = [h for h in [category_hint, builtin_realtime_hint, schedule_hint, preference_hint] if h]
+        deterministic_hint_context = "\n".join(f"- {h}" for h in deterministic_hints)
         current_datetime = datetime.now().astimezone().isoformat(timespec="seconds")
 
         # --------------------------------------------------------------
@@ -973,30 +1100,33 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
         # --------------------------------------------------------------
         system_instructions = (
             "You are a smart, grounded assistant.\n"
-            "You must synthesize facts from <LONG_TERM_PROFILE> and <CHAT_HISTORY> to maintain continuity.\n"
+            "You must synthesize facts from <LONG_TERM_PROFILE>, <CHAT_HISTORY>, and <SESSION_TEMP_FACTS> to maintain continuity.\n"
             "Use <LONG_TERM_PROFILE> for durable user-specific facts and rules.\n"
             "Treat memories tagged with importance=critical or domain=critical_context as persistent user rules.\n"
             "If a critical memory conflicts with older non-critical memory, prefer the critical memory.\n"
             "Use <CHAT_HISTORY> for recent references, implied entities, and conversation flow.\n"
+            "Use <SESSION_TEMP_FACTS> for temporary chat-local statements the user shared in this session.\n"
             "When the user says phrases like 'that show', 'that character', or 'the one I mentioned', resolve "
             "the reference from <CHAT_HISTORY> before checking <LONG_TERM_PROFILE>.\n"
             "Use memory only when its metadata context (domain/category/scope) matches the query.\n"
             "Ignore memories that are unscoped or confidence < 0.5.\n"
             "Reason from meaning, not keyword overlap.\n"
             "Do not force profile data into unrelated questions.\n"
+            "If <DETERMINISTIC_HINTS> is provided, treat it as verified logic and rephrase it naturally; do not copy it verbatim.\n"
+            "Do not infer personal traits in one domain from unrelated preferences in another domain.\n"
+            "If the user asks about a preference domain with no direct evidence, say you do not have it yet.\n"
             "If <REALTIME_CONTEXT> is provided, treat it as the highest-priority source for current facts.\n"
             "For general questions outside profile/preferences, answer directly using your general knowledge and "
             "any realtime context.\n"
             "For personal preference/fact queries, first use exact entity-specific memory facts with confidence >= 0.5.\n"
-            "If entity-specific data is missing, you may use broader/global preference rules to infer a likely answer.\n"
-            "When using broader rules, prefer adding a short uncertainty cue (for example: best guess).\n"
-            "If a GLOBAL_RULE exists, proactively execute it for newly mentioned entities:\n"
+            "Do not infer missing personal preference facts from unrelated or broad rules.\n"
+            "If a GLOBAL_RULE exists, execute it only when the user explicitly asks about that matching preference subject/domain:\n"
             "Step A: identify the entity in the current query.\n"
-            "Step B: resolve the rule into a concrete fact using your knowledge.\n"
-            "Step C: check for matching exceptions in <LONG_TERM_PROFILE>.\n"
-            "Step D: return the specific resolved fact, not the raw rule text.\n"
+            "Step B: check for matching exceptions in <LONG_TERM_PROFILE>.\n"
+            "Step C: if no direct specific fact exists, state that you do not have that stored information.\n"
             "Before finalizing the response, do a brief internal reasoning check: verify whether a global rule "
             "applies to the current topic and, if it does, resolve it into a specific answer.\n"
+            "If no direct evidence exists for the asked topic, say you do not have that specific preference stored yet.\n"
             "Never say \"Based on your profile\" or \"As you mentioned.\" "
             "Simply use the facts as if they are common knowledge between us.\n"
             "Prefer natural answers, not memory tags or rule text.\n"
@@ -1021,6 +1151,12 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
 <CHAT_HISTORY>
 {chat_history_context}
 </CHAT_HISTORY>
+<SESSION_TEMP_FACTS>
+{session_temp_facts}
+</SESSION_TEMP_FACTS>
+<DETERMINISTIC_HINTS>
+{deterministic_hint_context}
+</DETERMINISTIC_HINTS>
 <RESOLVED_USER_MESSAGE>
 {continuity_message}
 </RESOLVED_USER_MESSAGE>
@@ -1040,6 +1176,18 @@ User message:
                     + "Respond with a fresh, context-aware answer in 1-3 sentences."
                 )
                 retry = generate_response(anti_repeat_prompt)
+                if retry:
+                    reply = sanitize_response(continuity_message, retry)
+            if _is_irrelevant_reply(continuity_message, reply):
+                relevance_retry_prompt = (
+                    full_prompt
+                    + "\n\nYour previous response was not relevant to the user message.\n"
+                    + f"Previous response: {reply}\n"
+                    + "Respond again with only directly relevant information.\n"
+                    + "If direct personal evidence is missing for the asked topic, say that clearly in one sentence.\n"
+                    + "Do not borrow unrelated profile domains."
+                )
+                retry = generate_response(relevance_retry_prompt)
                 if retry:
                     reply = sanitize_response(continuity_message, retry)
         except RuntimeError as e:
