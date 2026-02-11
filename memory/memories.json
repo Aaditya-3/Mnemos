@@ -3,9 +3,14 @@
     "id": "7a134aa5-416d-4bd1-a1e0-a6d7bd60f82d",
     "user_id": "guest",
     "type": "preference",
-    "key": "favorite_food",
+    "key": "lifestyle.food",
     "value": "pizza",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "lifestyle",
+      "category": "food",
+      "scope": "GLOBAL_SCOPE"
+    },
     "created_at": "2026-02-10T16:12:52.326071",
     "last_updated": "2026-02-10T16:12:52.326071"
   },
@@ -13,49 +18,61 @@
     "id": "6c471a34-a0a5-4c00-b006-2d0750318048",
     "user_id": "guest",
     "type": "fact",
-    "key": "anime_preference",
+    "key": "entertainment.anime",
     "value": "AOT (Attack on Titan)",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "entertainment",
+      "category": "anime",
+      "scope": "GLOBAL_SCOPE"
+    },
     "created_at": "2026-02-10T16:32:59.733383",
     "last_updated": "2026-02-10T16:32:59.733383"
-  },
-  {
-    "id": "2013f910-0fd9-42cd-99a1-af77d9a1f66d",
-    "user_id": "guest",
-    "type": "fact",
-    "key": "interest",
-    "value": "watching anime",
-    "confidence": 0.7,
-    "created_at": "2026-02-10T16:33:47.110025",
-    "last_updated": "2026-02-10T16:33:47.110025"
   },
   {
     "id": "05d6686e-c486-4820-a043-50c6668a5698",
     "user_id": "aaditya_03",
     "type": "preference",
-    "key": "favorite_food",
+    "key": "lifestyle.food",
     "value": "pizza",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "lifestyle",
+      "category": "food",
+      "scope": "GLOBAL_SCOPE"
+    },
     "created_at": "2026-02-10T19:01:05.016310",
     "last_updated": "2026-02-10T19:01:05.016310"
   },
   {
     "id": "6ed4251d-f7f9-47e0-b054-6ae7f5161933",
     "user_id": "aaditya_03",
-    "type": "fact",
-    "key": "anime_preference",
-    "value": "AOT (Attack on Titan)",
-    "confidence": 0.7,
+    "type": "preference",
+    "key": "entertainment.global_character_rule",
+    "value": "mc",
+    "confidence": 0.55,
+    "metadata": {
+      "rule_type": "universal",
+      "scope": "GLOBAL_SCOPE",
+      "subject": "anime_character_preference",
+      "domain": "entertainment",
+      "category": "favorite_character"
+    },
     "created_at": "2026-02-10T19:01:05.024400",
-    "last_updated": "2026-02-10T19:01:05.024400"
+    "last_updated": "2026-02-10T22:22:46.446338"
   },
   {
     "id": "be6b33b1-00cd-499e-81ec-905428179eac",
     "user_id": "aaditya_03",
     "type": "fact",
-    "key": "interest",
+    "key": "lifestyle.gym",
     "value": "going gym",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "lifestyle",
+      "category": "gym",
+      "scope": "GLOBAL_SCOPE"
+    },
     "created_at": "2026-02-10T19:01:05.033272",
     "last_updated": "2026-02-10T19:11:10.407445"
   },
@@ -63,29 +80,29 @@
     "id": "f47b9eaa-a926-44a0-a8f0-c2d18b158b7b",
     "user_id": "aaditya_03",
     "type": "fact",
-    "key": "location",
+    "key": "core_identity.college",
     "value": "IIIT Lucknow",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "identity",
+      "category": "college",
+      "scope": "PROFILE"
+    },
     "created_at": "2026-02-10T19:06:32.149079",
     "last_updated": "2026-02-10T19:06:32.149079"
-  },
-  {
-    "id": "6fbdb686-78d8-45e2-b421-cecce4c3b097",
-    "user_id": "aaditya_03",
-    "type": "fact",
-    "key": "favourite anime character",
-    "value": "Gojo from JJK",
-    "confidence": 0.7,
-    "created_at": "2026-02-10T19:07:34.738994",
-    "last_updated": "2026-02-10T19:07:34.738994"
   },
   {
     "id": "23372020-0d4e-4ab2-ae2d-e4c306df357e",
     "user_id": "aaditya_03",
     "type": "fact",
-    "key": "year of graduation",
+    "key": "core_identity.year",
     "value": "2nd",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "identity",
+      "category": "year",
+      "scope": "PROFILE"
+    },
     "created_at": "2026-02-10T19:07:58.686552",
     "last_updated": "2026-02-10T19:07:58.686552"
   },
@@ -93,9 +110,14 @@
     "id": "c3921917-9e63-4b95-988f-db65aaa96f90",
     "user_id": "aaditya_03",
     "type": "fact",
-    "key": "name",
+    "key": "core_identity.name",
     "value": "Aaditya Kothari",
     "confidence": 0.7,
+    "metadata": {
+      "domain": "identity",
+      "category": "name",
+      "scope": "PROFILE"
+    },
     "created_at": "2026-02-10T19:09:48.571757",
     "last_updated": "2026-02-10T19:09:48.571757"
   },
@@ -103,10 +125,75 @@
     "id": "e6acc20a-6694-4955-a652-c62fc8b21ba3",
     "user_id": "aaditya_03",
     "type": "preference",
-    "key": "favourite soft drink",
+    "key": "lifestyle.drinks",
     "value": "Coca Cola",
-    "confidence": 0.7,
+    "confidence": 0.7999999999999999,
+    "metadata": {
+      "domain": "lifestyle",
+      "category": "drinks",
+      "scope": "GLOBAL_SCOPE"
+    },
     "created_at": "2026-02-10T19:10:13.347096",
-    "last_updated": "2026-02-10T19:10:13.347096"
+    "last_updated": "2026-02-10T22:19:21.711471"
+  },
+  {
+    "id": "8f5705ea-3891-407b-b987-59b46659cf5c",
+    "user_id": "aaditya_03",
+    "type": "preference",
+    "key": "entertainment.character_exception.jjk",
+    "value": "gojo",
+    "confidence": 0.8,
+    "metadata": {
+      "rule_type": "exception",
+      "scope": "LOCAL_SCOPE",
+      "subject": "jjk",
+      "domain": "entertainment",
+      "category": "favorite_character"
+    },
+    "created_at": "2026-02-10T22:21:18.173967",
+    "last_updated": "2026-02-10T22:21:18.173967"
+  },
+  {
+    "id": "bcdf6776-7b71-4a1c-a127-a3b2db8a815a",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "entertainment.anime",
+    "value": "the mc of all the animes",
+    "confidence": 0.7,
+    "metadata": {
+      "domain": "entertainment",
+      "category": "anime",
+      "scope": "GLOBAL_SCOPE"
+    },
+    "created_at": "2026-02-10T23:04:08.147765",
+    "last_updated": "2026-02-11T01:07:06.786274"
+  },
+  {
+    "id": "42d4961d-583f-4c1f-a0c2-a39986457c0b",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "entertainment.character_preference",
+    "value": "my fav char",
+    "confidence": 0.7,
+    "metadata": null,
+    "created_at": "2026-02-10T23:04:27.776916",
+    "last_updated": "2026-02-10T23:40:18.458347"
+  },
+  {
+    "id": "8dcd9676-a021-4f2e-b512-dd11372a6ecd",
+    "user_id": "aaditya_03",
+    "type": "constraint",
+    "key": "custom.critical.have_very_important_test_upcoming",
+    "value": "that i have a very important test on this upcoming friday and also i have an important class tomorrow",
+    "confidence": 0.9,
+    "metadata": {
+      "domain": "critical_context",
+      "category": "have_very_important_test_upcoming",
+      "scope": "GLOBAL_SCOPE",
+      "importance": "critical",
+      "source": "explicit_user_instruction"
+    },
+    "created_at": "2026-02-11T12:33:42.841767",
+    "last_updated": "2026-02-11T12:33:42.841767"
   }
 ]

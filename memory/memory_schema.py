@@ -21,6 +21,7 @@ class Memory:
     key: str
     value: str
     confidence: float
+    metadata: dict | None
     created_at: datetime
     last_updated: datetime
     
@@ -40,6 +41,7 @@ class Memory:
         key: str,
         value: str,
         confidence: float = 0.7,
+        metadata: dict | None = None,
     ) -> "Memory":
         """Create a new memory with auto-generated ID and timestamps."""
         now = datetime.now()
@@ -50,6 +52,7 @@ class Memory:
             key=key,
             value=value,
             confidence=confidence,
+            metadata=metadata,
             created_at=now,
             last_updated=now
         )
@@ -63,6 +66,7 @@ class Memory:
             "key": self.key,
             "value": self.value,
             "confidence": self.confidence,
+            "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
             "last_updated": self.last_updated.isoformat()
         }
@@ -77,6 +81,7 @@ class Memory:
             key=data["key"],
             value=data["value"],
             confidence=data["confidence"],
+            metadata=data.get("metadata"),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_updated=datetime.fromisoformat(data["last_updated"])
         )

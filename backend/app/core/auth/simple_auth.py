@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-APP_USERNAME = os.getenv("APP_USERNAME", "aaditya")
-APP_PASSWORD = os.getenv("APP_PASSWORD", "aaditya123")
+APP_USERNAME = os.getenv("APP_USERNAME")
+APP_PASSWORD = os.getenv("APP_PASSWORD")
 PBKDF2_ITERATIONS = 120_000
 PBKDF2_ALGORITHM = "sha256"
 SALT_BYTES = 16
@@ -83,7 +83,9 @@ def _validate_payload(username: str, password: str):
 
 
 # In-memory account store for this app session.
-_users: dict[str, str] = {_normalize_username(APP_USERNAME): _hash_password(APP_PASSWORD)}
+_users: dict[str, str] = {}
+if APP_USERNAME and APP_PASSWORD:
+    _users[_normalize_username(APP_USERNAME)] = _hash_password(APP_PASSWORD)
 _project_root = Path(__file__).resolve().parents[4]
 _users_store_path = _project_root / "memory" / "users.json"
 

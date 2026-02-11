@@ -3,6 +3,8 @@ const { useEffect, useRef, useState } = React;
 const API_URL = "/chat";
 const CHATS_API = "/chats";
 const USER_ID_KEY = "user_id";
+const WELCOME_MESSAGE =
+    "Welcome to Memory Chat. I keep track of what matters to you and carry context across conversations.";
 
 async function parseApiResponse(response) {
     const contentType = response.headers.get("content-type") || "";
@@ -23,18 +25,19 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
     };
 
     return (
-        <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center px-4">
-            <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl">
-                <h1 className="text-2xl font-bold mb-2 text-white">AI Chat with Memory</h1>
-                <p className="text-slate-400 text-sm mb-5">
-                    {mode === "login" ? "Login to continue" : "Create an account first"}
+        <div className="min-h-screen bg-[#161B22] text-[#EDE2D2] flex items-center justify-center px-4">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(148,137,121,0.2),transparent_45%),radial-gradient(circle_at_85%_10%,rgba(223,208,184,0.08),transparent_35%)]" />
+            <div className="relative w-full max-w-md bg-[#393E46]/92 border border-[#948979]/45 rounded-3xl p-7 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur">
+                <h1 className="text-2xl font-bold tracking-tight text-[#EDE2D2]">Memory Chat</h1>
+                <p className="text-[#948979] text-sm mt-1 mb-5">
+                    {mode === "login" ? "Sign in to continue" : "Create your account"}
                 </p>
-                <div className="grid grid-cols-2 gap-2 mb-5 bg-slate-700 p-1 rounded-lg">
+                <div className="grid grid-cols-2 gap-2 mb-5 bg-[#161B22] border border-[#948979]/40 p-1 rounded-xl">
                     <button
                         type="button"
                         onClick={() => setMode("login")}
-                        className={`py-2 rounded-md text-sm font-semibold transition-colors ${
-                            mode === "login" ? "bg-blue-600 text-white" : "text-slate-300 hover:text-white"
+                        className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
+                            mode === "login" ? "bg-[#948979] text-[#161B22]" : "text-[#948979] hover:text-[#EDE2D2]"
                         }`}
                     >
                         Login
@@ -42,21 +45,21 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                     <button
                         type="button"
                         onClick={() => setMode("signup")}
-                        className={`py-2 rounded-md text-sm font-semibold transition-colors ${
-                            mode === "signup" ? "bg-blue-600 text-white" : "text-slate-300 hover:text-white"
+                        className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
+                            mode === "signup" ? "bg-[#948979] text-[#161B22]" : "text-[#948979] hover:text-[#EDE2D2]"
                         }`}
                     >
                         Signup
                     </button>
                 </div>
-                <form onSubmit={submit} className="space-y-4">
+                <form onSubmit={submit} className="space-y-3">
                     <input
                         type="text"
                         required
                         placeholder="Username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="w-full bg-slate-700 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
                     />
                     <input
                         type="password"
@@ -64,23 +67,51 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
                         placeholder="Password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-slate-700 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979]"
                     />
                     {error && (
-                        <div className="text-sm text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
+                        <div className="text-sm text-red-200 bg-red-950/40 border border-red-900 rounded-xl px-3 py-2">
                             {error}
                         </div>
                     )}
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white font-semibold py-3 rounded-lg transition-colors"
+                        className="w-full bg-[#948979] hover:bg-[#EDE2D2] disabled:bg-[#393E46] disabled:text-[#948979] text-[#161B22] font-semibold py-3 rounded-xl transition-colors"
                     >
                         {isLoading ? "Please wait..." : mode === "login" ? "Login" : "Signup"}
                     </button>
                 </form>
             </div>
         </div>
+    );
+}
+
+function TypewriterText({ text, speed = 18, active = true }) {
+    const [display, setDisplay] = useState(active ? "" : text);
+
+    useEffect(() => {
+        if (!active) {
+            setDisplay(text);
+            return;
+        }
+
+        let i = 0;
+        const timer = setInterval(() => {
+            i += 1;
+            setDisplay(text.slice(0, i));
+            if (i >= text.length) clearInterval(timer);
+        }, speed);
+
+        return () => clearInterval(timer);
+    }, [text, speed, active]);
+
+    const done = display.length >= text.length;
+    return (
+        <span>
+            {display}
+            <span className={`ml-0.5 inline-block text-[#948979] ${done ? "opacity-0" : "opacity-100 animate-pulse"}`}>|</span>
+        </span>
     );
 }
 
@@ -95,16 +126,48 @@ function App() {
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [isWaitingResponse, setIsWaitingResponse] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [showAnimatedWelcome, setShowAnimatedWelcome] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
     const messagesEndRef = useRef(null);
+    const textareaRef = useRef(null);
+
+    const formatDateTime = (iso) => {
+        try {
+            return new Date(iso).toLocaleString([], {
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+            });
+        } catch {
+            return iso || "";
+        }
+    };
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages, isLoading]);
+        const behavior = isStreaming ? "auto" : "smooth";
+        messagesEndRef.current?.scrollIntoView({ behavior });
+    }, [messages, isLoading, isStreaming]);
 
     useEffect(() => {
         if (!userId) return;
         loadChats();
+    }, [userId]);
+
+    useEffect(() => {
+        if (!userId) return;
+        const welcomeKey = `welcome_seen_${userId}`;
+        const seen = localStorage.getItem(welcomeKey);
+        if (!seen) {
+            setShowAnimatedWelcome(true);
+            localStorage.setItem(welcomeKey, "1");
+            return;
+        }
+        setShowAnimatedWelcome(false);
     }, [userId]);
 
     useEffect(() => {
@@ -115,11 +178,31 @@ function App() {
         }
     }, [currentChatId]);
 
+    useEffect(() => {
+        autoResizeTextarea();
+    }, [inputMessage]);
+
     const getHeaders = (withJson = false, includeUser = false) => {
         const headers = {};
         if (withJson) headers["Content-Type"] = "application/json";
         if (includeUser && userId) headers["X-User-ID"] = userId;
         return headers;
+    };
+
+    const autoResizeTextarea = () => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        const maxHeight = 180;
+        el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+        el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+    };
+
+    const resetTextareaHeight = () => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = "48px";
+        el.style.overflowY = "hidden";
     };
 
     const logout = () => {
@@ -182,11 +265,42 @@ function App() {
         }
     };
 
+    const streamAssistantReply = (fullText) => {
+        const messageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        setMessages((prev) => [
+            ...prev,
+            { id: messageId, role: "assistant", content: "", timestamp: new Date().toISOString() }
+        ]);
+        setIsStreaming(true);
+
+        return new Promise((resolve) => {
+            let i = 0;
+            let rafId = 0;
+            const tick = () => {
+                const step = Math.max(2, Math.ceil(fullText.length / 180));
+                i = Math.min(fullText.length, i + step);
+                const partial = fullText.slice(0, i);
+                setMessages((prev) =>
+                    prev.map((m) => (m.id === messageId ? { ...m, content: partial } : m))
+                );
+                if (i < fullText.length) {
+                    rafId = requestAnimationFrame(tick);
+                } else {
+                    setIsStreaming(false);
+                    resolve();
+                }
+            };
+            rafId = requestAnimationFrame(tick);
+        });
+    };
+
     const sendMessage = async () => {
         if (!inputMessage.trim() || isLoading) return;
         const userMessage = inputMessage.trim();
         setInputMessage("");
+        resetTextareaHeight();
         setIsLoading(true);
+        setIsWaitingResponse(true);
 
         setMessages((prev) => [
             ...prev,
@@ -202,20 +316,18 @@ function App() {
             const data = await parseApiResponse(response);
             if (!response.ok) throw new Error(data.error || data.detail || "Failed to get response");
 
-            setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: data.reply, timestamp: new Date().toISOString() }
-            ]);
+            setIsWaitingResponse(false);
+            await streamAssistantReply(data.reply || "");
             if (data.chat_id !== currentChatId) setCurrentChatId(data.chat_id);
             await loadChats();
         } catch (error) {
             console.error("Error sending message:", error);
-            setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: `Error: ${error.message}`, timestamp: new Date().toISOString() }
-            ]);
+            setIsWaitingResponse(false);
+            await streamAssistantReply(`Error: ${error.message}`);
         } finally {
             setIsLoading(false);
+            setIsWaitingResponse(false);
+            setIsStreaming(false);
         }
     };
 
@@ -253,12 +365,14 @@ function App() {
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 text-slate-100">
-            <div className={`${sidebarOpen ? "w-64" : "w-0"} transition-all duration-300 overflow-hidden bg-slate-800 border-r border-slate-700 flex flex-col`}>
-                <div className="p-4 border-b border-slate-700">
+        <div className="flex h-screen bg-[#161B22] text-[#EDE2D2]">
+            <div className="fixed inset-0 bg-[radial-gradient(circle_at_0%_0%,rgba(223,208,184,0.08),transparent_38%),radial-gradient(circle_at_100%_100%,rgba(148,137,121,0.2),transparent_42%)] pointer-events-none" />
+
+            <div className={`${sidebarOpen ? "w-72" : "w-0"} relative transition-all duration-500 ease-in-out overflow-hidden bg-[#393E46]/95 border-r border-[#948979]/45 flex flex-col`}>
+                <div className="p-4 border-b border-[#948979]/35">
                     <button
                         onClick={createNewChat}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+                        className="w-full bg-[#EDE2D2] hover:bg-[#DFD0B8] active:scale-[0.99] text-[#161B22] font-semibold py-2.5 px-4 rounded-xl transition-all duration-200 ease-out flex items-center justify-center gap-2"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -268,27 +382,40 @@ function App() {
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
                     {chats.length === 0 ? (
-                        <div className="text-slate-400 text-sm text-center mt-4">No chats yet. Start a new conversation!</div>
+                        <div className="text-[#948979] text-sm text-center mt-4">No chats yet. Start a new conversation.</div>
                     ) : (
                         chats.map((chat) => (
                             <div
                                 key={chat.id}
-                                className={`group p-3 mb-2 rounded-lg cursor-pointer transition-colors ${currentChatId === chat.id ? "bg-blue-600 text-white" : "bg-slate-700 hover:bg-slate-600 text-slate-200"}`}
+                                className={`group p-3 mb-2 rounded-xl cursor-pointer transition-all duration-250 ease-out transform-gpu ${
+                                    currentChatId === chat.id
+                                        ? "bg-[#EDE2D2] text-[#161B22] shadow-md ring-1 ring-[#EDE2D2]/50 scale-[1.01]"
+                                        : "bg-[#161B22]/80 hover:bg-[#161B22] hover:-translate-y-[1px] text-[#EDE2D2] border border-[#948979]/35"
+                                }`}
                                 onClick={() => setCurrentChatId(chat.id)}
                             >
                                 <div className="flex items-start justify-between">
                                     <div className="flex-1 min-w-0">
                                         <div className="font-medium truncate">{chat.title}</div>
-                                        <div className={`text-xs mt-1 ${currentChatId === chat.id ? "text-blue-100" : "text-slate-400"}`}>
-                                            {new Date(chat.updated_at).toLocaleDateString()}
+                                        <div className={`text-xs mt-1 ${currentChatId === chat.id ? "text-[#393E46]" : "text-[#948979]"}`}>
+                                            Created: {formatDateTime(chat.created_at)}
+                                        </div>
+                                        <div className={`text-xs ${currentChatId === chat.id ? "text-[#393E46]" : "text-[#948979]"}`}>
+                                            Updated: {formatDateTime(chat.updated_at)}
                                         </div>
                                     </div>
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            deleteChat(chat.id);
+                                            setDeleteConfirmChatId(chat.id);
                                         }}
-                                        className="ml-2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                                        className={`ml-2 transition-all duration-200 ease-out ${
+                                            currentChatId === chat.id
+                                                ? "text-[#393E46] hover:text-red-700"
+                                                : "text-[#948979] hover:text-red-400"
+                                        } ${
+                                            "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0"
+                                        }`}
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -301,18 +428,18 @@ function App() {
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col">
-                <div className="bg-slate-800 border-b border-slate-700 p-4 flex items-center justify-between">
+            <div className="flex-1 flex flex-col relative">
+                <div className="bg-[#393E46]/92 border-b border-[#948979]/35 p-4 flex items-center justify-between backdrop-blur">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-slate-300 hover:text-white transition-colors">
+                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-[#948979] hover:text-[#EDE2D2] transition-colors duration-200">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
-                        <h1 className="text-xl font-bold text-white">AI Chat with Memory</h1>
-                        <span className="text-xs text-slate-400">User: {userId}</span>
+                        <h1 className="text-xl font-semibold tracking-tight text-[#EDE2D2]">Memory Chat</h1>
+                        <span className="text-xs text-[#948979]">User: {userId}</span>
                     </div>
-                    <button onClick={logout} className="text-sm bg-slate-700 hover:bg-slate-600 text-slate-100 px-3 py-1.5 rounded-md transition-colors">
+                    <button onClick={logout} className="text-sm bg-[#161B22] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#EDE2D2] px-3 py-1.5 rounded-lg transition-all duration-200">
                         Logout
                     </button>
                 </div>
@@ -320,23 +447,34 @@ function App() {
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
                     {messages.length === 0 ? (
                         <div className="flex items-center justify-center h-full">
-                            <div className="text-center text-slate-400">
-                                <p className="text-lg font-medium mb-2">Start a conversation</p>
-                                <p className="text-sm">Send a message to begin chatting with AI</p>
+                            <div className="max-w-2xl w-full rounded-2xl border border-[#948979]/45 bg-[#393E46]/88 px-6 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
+                                <p className="text-xs uppercase tracking-[0.18em] text-[#948979] mb-2">Assistant</p>
+                                <p className="text-lg leading-relaxed text-[#EDE2D2]">
+                                    <TypewriterText text={WELCOME_MESSAGE} speed={16} active={showAnimatedWelcome} />
+                                </p>
+                                <p className="text-sm text-[#948979] mt-3">Start by sharing anything you want me to remember.</p>
                             </div>
                         </div>
                     ) : (
-                        <div className="max-w-4xl mx-auto space-y-6">
+                        <div className="max-w-4xl mx-auto space-y-5">
                             {messages.map((msg, idx) => (
-                                <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                                    <div className={`max-w-[80%] rounded-2xl px-5 py-3 ${msg.role === "user" ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-100"}`}>
-                                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                                <div key={msg.id || idx} className={`flex fade-up ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                                    <div
+                                        className={`max-w-[85%] rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
+                                            msg.role === "user"
+                                                ? "bg-[#EDE2D2] text-[#161B22]"
+                                                : "bg-[#393E46] text-[#EDE2D2] border border-[#948979]/35"
+                                        }`}
+                                    >
+                                        <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
                                     </div>
                                 </div>
                             ))}
-                            {isLoading && (
+                            {isWaitingResponse && (
                                 <div className="flex justify-start">
-                                    <div className="bg-slate-700 rounded-2xl px-5 py-3">Sending...</div>
+                                    <div className="bg-[#393E46] border border-[#948979]/35 rounded-2xl px-4 py-2 text-[#948979] text-sm">
+                                        Thinking...
+                                    </div>
                                 </div>
                             )}
                             <div ref={messagesEndRef} />
@@ -344,27 +482,57 @@ function App() {
                     )}
                 </div>
 
-                <div className="bg-slate-800 border-t border-slate-700 p-4">
-                    <div className="max-w-4xl mx-auto flex gap-3">
-                        <input
-                            type="text"
+                <div className="bg-[#393E46]/92 border-t border-[#948979]/35 p-4 backdrop-blur">
+                    <div className="max-w-4xl mx-auto flex items-end gap-3">
+                        <textarea
+                            ref={textareaRef}
                             value={inputMessage}
                             onChange={(e) => setInputMessage(e.target.value)}
                             onKeyDown={handleKeyPress}
+                            rows={1}
                             placeholder="Type your message..."
                             disabled={isLoading}
-                            className="flex-1 bg-slate-700 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                            className="flex-1 min-h-[48px] max-h-[180px] resize-none bg-[#161B22] border border-[#948979]/45 text-[#EDE2D2] placeholder-[#948979] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#948979] transition-all duration-200 disabled:opacity-50 custom-scrollbar"
                         />
                         <button
                             onClick={sendMessage}
                             disabled={isLoading || !inputMessage.trim()}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+                            className="bg-[#948979] hover:bg-[#EDE2D2] active:scale-[0.99] disabled:bg-[#393E46] disabled:text-[#948979] disabled:cursor-not-allowed text-[#161B22] font-semibold px-6 py-3 rounded-xl transition-all duration-200"
                         >
                             {isLoading ? "Sending..." : "Send"}
                         </button>
                     </div>
                 </div>
             </div>
+
+            {deleteConfirmChatId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm fade-in">
+                    <div className="w-full max-w-sm rounded-2xl border border-[#948979]/45 bg-[#393E46] p-5 shadow-2xl soft-pop">
+                        <h3 className="text-lg font-semibold text-[#EDE2D2]">Delete Chat?</h3>
+                        <p className="mt-2 text-sm text-[#948979]">
+                            This will permanently remove this chat from your sidebar.
+                        </p>
+                        <div className="mt-5 flex justify-end gap-2">
+                            <button
+                                onClick={() => setDeleteConfirmChatId(null)}
+                                className="rounded-lg border border-[#948979]/40 bg-[#161B22] px-4 py-2 text-sm text-[#EDE2D2] transition-colors hover:bg-[#393E46]"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    const chatId = deleteConfirmChatId;
+                                    setDeleteConfirmChatId(null);
+                                    await deleteChat(chatId);
+                                }}
+                                className="rounded-lg bg-red-500/90 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

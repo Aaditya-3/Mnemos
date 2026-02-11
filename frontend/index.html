@@ -11,25 +11,81 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Babel Standalone for JSX (dev only; for production precompile: https://babeljs.io/docs/setup/) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #222831;
+            --panel: #393E46;
+            --accent: #948979;
+            --text: #DFD0B8;
+        }
+
+        html, body {
+            scroll-behavior: smooth;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Manrope", sans-serif;
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes softPop {
+            from {
+                opacity: 0;
+                transform: scale(0.98) translateY(4px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .fade-up {
+            animation: fadeUp 200ms ease-out;
+        }
+
+        .fade-in {
+            animation: fadeIn 150ms ease-out;
+        }
+
+        .soft-pop {
+            animation: softPop 180ms ease-out;
+        }
+
         /* Custom scrollbar */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
-            background: #1e293b;
+            background: var(--panel);
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #475569;
+            background: var(--accent);
             border-radius: 3px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #64748b;
+            background: var(--text);
         }
     </style>
 </head>
-<body class="bg-slate-900">
+<body class="bg-[#222831]">
     <div id="root"></div>
-    <script type="text/babel" src="app.jsx"></script>
+    <script type="text/babel" src="app.jsx?v=20260211a"></script>
 </body>
 </html>
