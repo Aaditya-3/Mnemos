@@ -4,7 +4,7 @@ const API_URL = "/chat";
 const CHATS_API = "/chats";
 const USER_ID_KEY = "user_id";
 const WELCOME_MESSAGE =
-    "Welcome to Memory Chat. I keep track of what matters to you and carry context across conversations.";
+    "Welcome to Mnemos. I keep track of what matters to you and carry context across conversations.";
 
 async function parseApiResponse(response) {
     const contentType = response.headers.get("content-type") || "";
@@ -28,7 +28,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error }) {
         <div className="min-h-screen bg-[#161A30] text-[#F0ECE5] flex items-center justify-center px-4">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(148,137,121,0.2),transparent_45%),radial-gradient(circle_at_85%_10%,rgba(223,208,184,0.08),transparent_35%)]" />
             <div className="relative w-full max-w-md bg-[#393E46]/92 border border-[#948979]/45 rounded-3xl p-7 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur">
-                <h1 className="text-2xl font-bold tracking-tight text-[#F0ECE5]">Memory Chat</h1>
+                <h1 className="text-2xl font-bold tracking-tight text-[#F0ECE5]">Mnemos</h1>
                 <p className="text-[#948979] text-sm mt-1 mb-5">
                     {mode === "login" ? "Sign in to continue" : "Create your account"}
                 </p>
@@ -131,8 +131,10 @@ function App() {
     const [showAnimatedWelcome, setShowAnimatedWelcome] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
+    const [copiedMessageKey, setCopiedMessageKey] = useState("");
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
+    const copyResetTimerRef = useRef(null);
 
     const formatDateTime = (iso) => {
         try {
@@ -147,6 +149,7 @@ function App() {
             return iso || "";
         }
     };
+    const userInitial = ((userId || "").trim().charAt(0) || "U").toUpperCase();
 
     useEffect(() => {
         const behavior = isStreaming ? "auto" : "smooth";
@@ -182,6 +185,14 @@ function App() {
         autoResizeTextarea();
     }, [inputMessage]);
 
+    useEffect(() => {
+        return () => {
+            if (copyResetTimerRef.current) {
+                clearTimeout(copyResetTimerRef.current);
+            }
+        };
+    }, []);
+
     const getHeaders = (withJson = false, includeUser = false) => {
         const headers = {};
         if (withJson) headers["Content-Type"] = "application/json";
@@ -212,6 +223,40 @@ function App() {
         setCurrentChatId(null);
         setMessages([]);
         setAuthError("");
+        setCopiedMessageKey("");
+    };
+
+    const copyMessageToClipboard = async (text, messageKey) => {
+        const content = (text || "").toString();
+        if (!content) return;
+
+        let copied = false;
+        try {
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(content);
+                copied = true;
+            }
+        } catch {
+            copied = false;
+        }
+
+        if (!copied) {
+            const ta = document.createElement("textarea");
+            ta.value = content;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.top = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            copied = document.execCommand("copy");
+            document.body.removeChild(ta);
+        }
+
+        if (copied) {
+            setCopiedMessageKey(messageKey);
+            if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+            copyResetTimerRef.current = setTimeout(() => setCopiedMessageKey(""), 1200);
+        }
     };
 
     const loadChats = async () => {
@@ -436,7 +481,7 @@ function App() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
-                        <h1 className="text-xl font-semibold tracking-tight text-[#F0ECE5]">Memory Chat</h1>
+                        <h1 className="text-xl font-semibold tracking-tight text-[#F0ECE5]">Mnemos</h1>
                         <span className="text-xs text-[#948979]">User: {userId}</span>
                     </div>
                     <button onClick={logout} className="text-sm bg-[#161A30] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#F0ECE5] px-3 py-1.5 rounded-lg transition-all duration-200">
@@ -448,7 +493,7 @@ function App() {
                     {messages.length === 0 ? (
                         <div className="flex items-center justify-center h-full">
                             <div className="max-w-2xl w-full rounded-2xl border border-[#948979]/45 bg-[#393E46]/88 px-6 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
-                                <p className="text-xs uppercase tracking-[0.18em] text-[#948979] mb-2">Assistant</p>
+                                <p className="text-xs uppercase tracking-[0.18em] text-[#948979] mb-2">Mnemos</p>
                                 <p className="text-lg leading-relaxed text-[#F0ECE5]">
                                     <TypewriterText text={WELCOME_MESSAGE} speed={16} active={showAnimatedWelcome} />
                                 </p>
@@ -457,19 +502,56 @@ function App() {
                         </div>
                     ) : (
                         <div className="max-w-4xl mx-auto space-y-5">
-                            {messages.map((msg, idx) => (
-                                <div key={msg.id || idx} className={`flex fade-up ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                                    <div
-                                        className={`max-w-[85%] rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
-                                            msg.role === "user"
-                                                ? "bg-[#F0ECE5] text-[#161A30]"
-                                                : "bg-[#31304D] text-[#F0ECE5] border border-[#948979]/35"
-                                        }`}
-                                    >
-                                        <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
+                            {messages.map((msg, idx) => {
+                                const messageKey = msg.id || `${msg.role}-${idx}`;
+                                const isCopied = copiedMessageKey === messageKey;
+                                const isUser = msg.role === "user";
+                                return (
+                                <div key={messageKey} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
+                                    <div className="group max-w-[85%]">
+                                        <div className={`flex items-center gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+                                            {!isUser && (
+                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[#948979]/45 bg-[#393E46] text-[#F0ECE5] text-sm font-semibold flex items-center justify-center">
+                                                    M
+                                                </div>
+                                            )}
+                                            <div
+                                                className={`rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
+                                                    isUser
+                                                        ? "bg-[#F0ECE5] text-[#161A30]"
+                                                        : "bg-[#31304D] text-[#F0ECE5] border border-[#948979]/35"
+                                                }`}
+                                            >
+                                                <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
+                                            </div>
+                                            {isUser && (
+                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[#948979]/45 bg-[#393E46] text-[#F0ECE5] text-sm font-semibold flex items-center justify-center">
+                                                    {userInitial}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className={`mt-1 flex ${isUser ? "justify-end" : "justify-start"}`}>
+                                            <button
+                                                type="button"
+                                                aria-label="Copy message"
+                                                onClick={() => copyMessageToClipboard(msg.content, messageKey)}
+                                                className="inline-flex h-8 w-8 items-center justify-center text-[#948979] opacity-0 transition-all duration-200 delay-0 group-hover:opacity-100 group-hover:delay-150 hover:text-[#F0ECE5] focus:opacity-100 focus:delay-0 focus:outline-none"
+                                            >
+                                                {isCopied ? (
+                                                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
+                                                    </svg>
+                                                ) : (
+                                                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                                    </svg>
+                                                )}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                            ))}
+                            )})}
                             {isWaitingResponse && (
                                 <div className="flex justify-start">
                                     <div className="bg-[#31304D] border border-[#948979]/35 rounded-2xl px-4 py-2 text-[#948979] text-sm">
