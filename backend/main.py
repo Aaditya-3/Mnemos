@@ -21,14 +21,15 @@ else:
 import os
 import json
 import re
+import time
 print("GROQ_API_KEY loaded:", bool(os.getenv("GROQ_API_KEY")))
 
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Header
+from typing import Any, List, Optional
+from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uuid
@@ -39,12 +40,23 @@ from memory.memory_store import get_memory_store
 from backend.app.core.llm.groq_client import generate_response
 from backend.app.core.tools.realtime_info import should_fetch_realtime, get_realtime_context
 from backend.app.core.db.mongo import get_db
+from backend.app.core.config import get_settings
+from backend.app.core.middleware import setup_middleware, validate_message_payload
 from backend.app.core.tools.preference_reasoning import (
     parse_preference_query,
     classify_memory_for_query,
 )
+from backend.app.observability.logging import setup_logging, log_event
+from backend.app.observability.metrics import metrics
+from backend.app.services.semantic_memory_service import get_semantic_memory_service
+from backend.app.services.streaming import stream_text_sse
+from backend.app.services.token_usage import estimate_tokens, estimate_cost_usd
+from backend.app.services.tool_router import run_agent_turn
+from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay
 
 project_root = _project_root
+settings = get_settings()
+setup_logging()
 api_key_loaded = bool(os.getenv("GROQ_API_KEY"))
 realtime_web_enabled = os.getenv("ENABLE_REALTIME_WEB", "true").strip().lower() in {"1", "true", "yes", "on"}
 mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -173,11 +185,12 @@ from backend.app.core.auth.simple_auth import router as simple_auth_router
 app = FastAPI(title="AI Chat with Memory")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+setup_middleware(app)
 
 frontend_path = project_root / "frontend"
 if frontend_path.exists():
@@ -786,11 +799,15 @@ load_chat_sessions()
 class ChatRequest(BaseModel):
     message: str
     chat_id: Optional[str] = None
+    use_tools: bool = False
+    scope: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     reply: str
     chat_id: str
+    usage: Optional[dict[str, Any]] = None
+    semantic_memories: Optional[list[dict[str, Any]]] = None
 
 
 class ChatSessionResponse(BaseModel):
@@ -799,6 +816,17 @@ class ChatSessionResponse(BaseModel):
     created_at: str
     updated_at: str
     message_count: int
+
+
+class AgentChatRequest(BaseModel):
+    message: str
+    chat_id: Optional[str] = None
+
+
+class AgentChatResponse(BaseModel):
+    reply: str
+    tool_events: list[dict[str, Any]]
+    usage: dict[str, Any]
 
 
 def detect_category_query(user_message: str) -> Optional[str]:
@@ -990,7 +1018,12 @@ def handle_builtin_realtime_query(user_message: str) -> Optional[str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-ID")):
+async def chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
     """
     Main chat endpoint.
     1. Receive user message
@@ -1006,8 +1039,7 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
             return JSONResponse(status_code=400, content={"error": "X-User-ID header is required"})
 
         user_message = request.message.strip()
-        if not user_message:
-            return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
+        validate_message_payload(user_message)
 
         store = get_memory_store()
         adjusted_count = store.apply_strong_feedback(user_id, user_message)
@@ -1032,6 +1064,39 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
         resolved_user_message = _resolve_short_reply_context(user_message, chat_session)
         continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
         is_ack_reply = _is_short_acknowledgement(user_message)
+
+        # Optional agentic tool execution path.
+        if request.use_tools and settings.enable_tools:
+            agent_result = run_agent_turn(continuity_message)
+            reply = sanitize_response(continuity_message, agent_result.get("reply", ""))
+            input_tokens = estimate_tokens(continuity_message)
+            output_tokens = estimate_tokens(reply)
+            metrics.inc("llm_tokens_input_total", input_tokens)
+            metrics.inc("llm_tokens_output_total", output_tokens)
+            usage = {
+                "input_tokens_est": input_tokens,
+                "output_tokens_est": output_tokens,
+                "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
+                "tool_calls": len(agent_result.get("tool_events") or []),
+            }
+
+            chat_session.messages.append(
+                {"role": "user", "content": user_message, "timestamp": datetime.now().isoformat()}
+            )
+            chat_session.messages.append(
+                {"role": "assistant", "content": reply, "timestamp": datetime.now().isoformat()}
+            )
+            _persist_chat_session(chat_session)
+            enforce_user_chat_token_budget(user_id)
+            if settings.enable_background_tasks:
+                background_tasks.add_task(
+                    enqueue_ingest_message,
+                    user_id,
+                    continuity_message,
+                    "",
+                    request.scope,
+                )
+            return ChatResponse(reply=reply, chat_id=chat_id, usage=usage, semantic_memories=[])
 
         # --------------------------------------------------------------
         # A. Handle explicit category-profile queries (top 3)
@@ -1058,6 +1123,22 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
         # B. Retrieve existing memories FIRST (no new extraction yet)
         # --------------------------------------------------------------
         memory_context = ""
+        semantic_rows: list[dict[str, Any]] = []
+        semantic_context = ""
+        if settings.enable_semantic_memory and not is_ack_reply:
+            try:
+                semantic_service = get_semantic_memory_service()
+                semantic_rows, semantic_context = semantic_service.retrieve_context(
+                    user_id=user_id,
+                    query=continuity_message,
+                    top_k=settings.semantic_top_k,
+                    scopes=["user", "project", "conversation", "global"],
+                )
+            except Exception as e:
+                log_event("semantic_retrieval_failed", user_id=user_id, error=str(e))
+                semantic_rows = []
+                semantic_context = ""
+
         try:
             memory_context = retrieve_memories(continuity_message, user_id)
             if memory_context:
@@ -1069,6 +1150,9 @@ async def chat(request: ChatRequest, x_user_id: str = Header(..., alias="X-User-
         except Exception as e:
             print(f"WARNING: Memory retrieval error (non-fatal): {e}")
             memory_context = ""
+
+        if semantic_context:
+            memory_context = f"{memory_context}\n{semantic_context}".strip() if memory_context else semantic_context
 
         long_term_profile = _build_long_term_profile(user_id, query_message=continuity_message)
         chat_history_context = _build_chat_history_context(chat_session)
@@ -1208,6 +1292,16 @@ User message:
         except RuntimeError as e:
             return JSONResponse(status_code=500, content={"error": f"AI service error: {str(e)}"})
 
+        input_tokens = estimate_tokens(full_prompt)
+        output_tokens = estimate_tokens(reply)
+        metrics.inc("llm_tokens_input_total", input_tokens)
+        metrics.inc("llm_tokens_output_total", output_tokens)
+        usage = {
+            "input_tokens_est": input_tokens,
+            "output_tokens_est": output_tokens,
+            "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
+        }
+
         # --------------------------------------------------------------
         # E. AFTER response is generated, extract any new memory
         #    so the LLM doesn't see what it just created on this turn.
@@ -1223,6 +1317,15 @@ User message:
         except Exception as e:
             print(f"WARNING: Memory extraction error (non-fatal): {e}")
 
+        if settings.enable_background_tasks and settings.enable_semantic_memory:
+            background_tasks.add_task(
+                enqueue_ingest_message,
+                user_id,
+                continuity_message,
+                "",
+                request.scope,
+            )
+
         chat_session.messages.append({
             "role": "user",
             "content": user_message,
@@ -1236,7 +1339,16 @@ User message:
         _persist_chat_session(chat_session)
         enforce_user_chat_token_budget(user_id)
 
-        return ChatResponse(reply=reply, chat_id=chat_id)
+        log_event(
+            "chat_completed",
+            request_id=getattr(http_request.state, "request_id", ""),
+            user_id=user_id,
+            chat_id=chat_id,
+            semantic_memories=len(semantic_rows),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+        return ChatResponse(reply=reply, chat_id=chat_id, usage=usage, semantic_memories=semantic_rows)
 
     except HTTPException:
         raise
@@ -1395,9 +1507,134 @@ async def get_memories(x_user_id: str = Header(..., alias="X-User-ID")):
     }
 
 
+@app.get("/memories/semantic")
+async def get_semantic_memories(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        return JSONResponse(status_code=400, content={"error": "X-User-ID header is required"})
+    service = get_semantic_memory_service()
+    memories = service.list_user_memories(user_id)
+    return {
+        "user_id": user_id,
+        "total": len(memories),
+        "memories": [m.to_dict() for m in memories],
+    }
+
+
+@app.delete("/memories/semantic/{memory_id}")
+async def delete_semantic_memory(memory_id: str, x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        return JSONResponse(status_code=400, content={"error": "X-User-ID header is required"})
+    service = get_semantic_memory_service()
+    deleted = service.delete_user_memory(user_id=user_id, memory_id=memory_id)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "Semantic memory not found"})
+    return {"status": "deleted", "memory_id": memory_id}
+
+
+@app.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    if not settings.enable_streaming:
+        return JSONResponse(status_code=400, content={"error": "Streaming is disabled"})
+    result = await chat(request=request, background_tasks=background_tasks, http_request=http_request, x_user_id=x_user_id)
+    if isinstance(result, JSONResponse):
+        return result
+    request_id = getattr(http_request.state, "request_id", "")
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        stream_text_sse(
+            result.reply,
+            request_id=request_id,
+            start_payload={
+                "chat_id": result.chat_id,
+                "usage": result.usage or {},
+                "semantic_count": len(result.semantic_memories or []),
+            },
+        ),
+        media_type="text/event-stream",
+        headers=headers,
+    )
+
+
+@app.post("/chat/agent", response_model=AgentChatResponse)
+async def chat_agent(
+    request: AgentChatRequest,
+    background_tasks: BackgroundTasks,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    if not settings.enable_tools:
+        raise HTTPException(status_code=400, detail="Tool execution is disabled")
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    message = (request.message or "").strip()
+    validate_message_payload(message)
+    started = time.perf_counter()
+    result = run_agent_turn(message)
+    reply = sanitize_response(message, result.get("reply", ""))
+    input_tokens = estimate_tokens(message)
+    output_tokens = estimate_tokens(reply)
+    metrics.inc("llm_tokens_input_total", input_tokens)
+    metrics.inc("llm_tokens_output_total", output_tokens)
+    usage = {
+        "input_tokens_est": input_tokens,
+        "output_tokens_est": output_tokens,
+        "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
+        "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+    if settings.enable_background_tasks and settings.enable_semantic_memory:
+        background_tasks.add_task(enqueue_ingest_message, user_id, message, "", "user")
+    return AgentChatResponse(reply=reply, tool_events=result.get("tool_events") or [], usage=usage)
+
+
+@app.get("/tools")
+async def list_tools():
+    from backend.app.tools.registry import tool_registry
+
+    return {"tools": tool_registry.list_tools()}
+
+
+@app.post("/admin/semantic/decay")
+async def run_semantic_decay(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    return run_decay(user_id)
+
+
+@app.post("/admin/semantic/compress")
+async def run_semantic_compression(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    return run_compression(user_id)
+
+
+@app.get("/metrics")
+async def get_metrics():
+    payload, content_type = metrics.export()
+    return PlainTextResponse(content=payload, media_type=content_type)
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "api_key_loaded": api_key_loaded}
+    return {
+        "status": "ok",
+        "api_key_loaded": api_key_loaded,
+        "semantic_memory_enabled": settings.enable_semantic_memory,
+        "streaming_enabled": settings.enable_streaming,
+        "tools_enabled": settings.enable_tools,
+    }
 
 
 if __name__ == "__main__":

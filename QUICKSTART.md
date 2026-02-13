@@ -1,68 +1,76 @@
 # Quick Start Guide
 
-## 🚀 Get Running in 3 Steps
+## Get Running
 
-### Step 1: Install Dependencies
+### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Step 2: Create .env File
+### 2. Create `.env`
 ```bash
-# Option A: Use the helper script
+# Option A
 python setup_env.py
 
-# Option B: Manual copy
+# Option B
 copy .env.example .env    # Windows
 cp .env.example .env      # Linux/Mac
 ```
 
-**Important:** Set `GROQ_API_KEY` in `.env`. Get your key from https://console.groq.com
+Set at minimum:
+```env
+GROQ_API_KEY=your_key_here
+```
 
-### Step 3: Start Backend (Serves Frontend Too!)
+### 3. Start Backend
 ```bash
-# From project root directory
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Verify:** You should see:
-```
-Loaded .env from: C:\temp2\.env
-GROQ_API_KEY loaded: True
-API key preview: gsk_...
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
-
-### Step 4: Open Frontend
-**Just open your browser and go to:**
-```
+### 4. Open App
+Go to:
+```text
 http://localhost:8000
 ```
 
-That's it! The backend serves both the API and the frontend React app.
+Optional production frontend scaffold:
+```bash
+cd frontend-vite
+npm install
+npm run dev
+```
 
-## ✅ Verification Checklist
+## Semantic Memory + Streaming Defaults
 
-- [ ] `.env` file exists in project root
-- [ ] Backend shows `GROQ_API_KEY loaded: True`
-- [ ] Backend is running on `http://localhost:8000`
-- [ ] Frontend can connect to backend
-- [ ] Test message gets a response from Groq
+```env
+ENABLE_SEMANTIC_MEMORY=true
+ENABLE_STREAMING=true
+ENABLE_TOOLS=true
+```
 
-## 🐛 If GROQ_API_KEY loaded: False
+Optional vector backend:
+```env
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=mnemos_semantic_memory
+```
 
-1. Check `.env` file exists: `dir .env` (Windows) or `ls -la .env` (Linux/Mac)
-2. Verify file format: `GROQ_API_KEY=your_key` (no spaces around `=`)
-3. Ensure you're running from project root (where `requirements.txt` is)
-4. Restart backend after creating/editing `.env`
+## Useful Endpoints
 
-## 📝 Test the Memory System
+- `POST /chat`
+- `POST /chat/stream`
+- `POST /chat/agent`
+- `GET /tools`
+- `GET /memories/semantic`
+- `DELETE /memories/semantic/{memory_id}`
+- `POST /admin/semantic/decay`
+- `POST /admin/semantic/compress`
+- `GET /metrics`
+- `GET /health`
 
-Try these messages to test memory:
+## Verification Checklist
 
-1. "My name is Alice and I prefer Python programming"
-2. "What's my preferred programming language?"
-3. "I'm working on a project with a deadline next week"
-4. "What did I tell you about my deadline?"
-
-The system should remember your preferences and facts across messages!
+- [ ] Backend starts cleanly and `GROQ_API_KEY loaded: True` is shown.
+- [ ] `POST /chat` returns `usage` and `chat_id`.
+- [ ] `POST /chat/stream` emits `start`, `token`, and `done` events.
+- [ ] `GET /memories/semantic` returns semantic memory rows after chatting.
+- [ ] `GET /metrics` exposes request/latency/token metrics.

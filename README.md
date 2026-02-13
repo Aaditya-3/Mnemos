@@ -2,52 +2,90 @@
 
 A complete chat application powered by Groq with persistent memory capabilities. The system remembers user preferences, constraints, and facts across conversations.
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-Frontend (HTML + JS)
-        ↓
-FastAPI Backend
-        ↓
-Memory Extraction (optional)
-        ↓
-Memory Store (persistent)
-        ↓
-Memory Retrieval
-        ↓
-Groq LLM
-        ↓
-Response back to user
+Frontend (React 18 + Tailwind CSS + Babel JSX)
+        ->
+FastAPI backend (Uvicorn)
+        ->
+Chat Orchestrator
+  - deterministic memory retrieval
+  - semantic memory retrieval (vector search)
+  - optional tool routing
+  - optional realtime context fetch
+        ->
+Groq LLM (`llama-3.1-8b-instant` by default)
+        ->
+Streaming + response persistence
+        ->
+Background semantic memory ingestion + decay/compression hooks
 ```
 
-## 📁 Project Structure
+## Tech Stack (Current)
+
+- Backend: Python, FastAPI, Uvicorn, Pydantic v2, python-dotenv
+- LLM: Groq Python SDK (`groq`) with model from `GROQ_MODEL` (default `llama-3.1-8b-instant`)
+- Memory/Data: classic memory store + semantic vector store (Qdrant when available, JSON fallback), optional MongoDB via PyMongo (`ENABLE_MONGO=true`)
+- Auth/Security: username/password auth (PBKDF2-HMAC with `hashlib` + `hmac`), JWT via `python-jose`, CORS middleware, request-id + security headers + prompt guard + rate limiting
+- Realtime/HTTP: `httpx` for realtime web lookups and Google token verification
+- Observability: structured app logs + Prometheus-style metrics endpoint (`/metrics`)
+- Background tasks: FastAPI `BackgroundTasks`, optional Celery/Redis worker scaffolding
+- Frontend: React 18 + ReactDOM 18 (CDN), Tailwind CSS (CDN), Babel Standalone for in-browser JSX transpile
+- Serving: FastAPI serves `frontend/index.html`, `frontend/app.jsx`, and static assets
+- External APIs: Groq API, Frankfurter currency API, DuckDuckGo Instant Answer API, Google `tokeninfo` endpoint (optional)
+
+## Project Structure
 
 ```
 project_root/
-│
-├── backend/
-│   └── app.py                 # FastAPI server
-│
-├── llm/
-│   └── app/core/llm/groq_client.py   # Groq LLM client
-│
-├── memory/
-│   ├── memory_schema.py       # Memory data structure
-│   ├── memory_store.py        # In-memory storage
-│   ├── memory_extractor.py    # Extract memories from messages
-│   └── memory_retriever.py    # Retrieve relevant memories
-│
-├── frontend/
-│   ├── index.html             # Chat UI
-│   └── script.js              # Frontend logic
-│
-├── .env.example               # Environment template
-├── .gitignore                 # Git ignore rules
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+|-- backend/
+|   |-- main.py                         # FastAPI app entrypoint
+|   `-- app/
+|       |-- core/                       # config + middleware + auth/db/llm/tool primitives
+|       |-- observability/              # logging + metrics
+|       |-- embeddings/                 # embedding provider abstraction
+|       |-- vector_store/               # Qdrant/local vector repository
+|       |-- memory/                     # semantic memory models
+|       |-- services/                   # semantic retrieval, streaming, tools
+|       |-- tools/                      # calculator, currency, web search
+|       `-- tasks/                      # background memory tasks + Celery wiring
+|-- memory/
+|   |-- memory_schema.py
+|   |-- memory_store.py
+|   |-- memory_extractor.py
+|   |-- memory_retriever.py
+|   |-- memories.json                   # default memory persistence
+|   |-- chat_sessions.json              # default chat persistence
+|   |-- users.json                      # simple auth user store
+|   `-- semantic_memories.json          # semantic vector fallback storage
+|-- frontend/
+|   |-- index.html
+|   |-- app.jsx
+|   `-- script.js
+|-- frontend-vite/                     # production frontend build scaffold
+|   |-- package.json
+|   |-- vite.config.js
+|   `-- src/
+|-- requirements.txt
+|-- QUICKSTART.md
+`-- README.md
 ```
 
-## 🚀 Setup
+## Production Features Implemented
+
+- Semantic memory ingestion with embeddings and vector retrieval
+- Vector backend abstraction: Qdrant (if configured) or local JSON fallback
+- Ranked memory retrieval with similarity + importance + recency weighting
+- Background semantic ingestion hooks via FastAPI `BackgroundTasks`
+- Memory lifecycle utilities: decay and compression endpoints
+- SSE streaming endpoint for token-by-token frontend rendering
+- Tool registry and agentic chat endpoint (`/chat/agent`) with structured tool execution
+- Observability improvements: structured request logs + `/metrics` endpoint
+- Security hardening baseline: rate limiting, request-id propagation, security headers, prompt-injection guard
+- Frontend memory inspector panel with semantic memory delete action
+
+## Setup
 
 ### 1. Install Dependencies
 
@@ -124,22 +162,59 @@ The frontend will be served from the root URL, and all API calls will work autom
 
 **Note:** If you prefer to serve the frontend separately, you can still open `frontend/index.html` directly in your browser, but you'll need to update the `API_URL` in `script.js` back to `http://localhost:8000/chat`.
 
-## 💾 Memory System
+### 5. Optional Production Frontend (Vite)
+
+```bash
+cd frontend-vite
+npm install
+npm run dev
+```
+
+Vite dev server starts on `http://localhost:5173` and proxies API calls to `http://localhost:8000`.
+
+## Key Environment Variables
+
+```env
+# semantic memory
+ENABLE_SEMANTIC_MEMORY=true
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=bge-small-en-v1.5
+EMBEDDING_DIMS=384
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=mnemos_semantic_memory
+
+# streaming/tools/background
+ENABLE_STREAMING=true
+ENABLE_TOOLS=true
+ENABLE_BACKGROUND_TASKS=true
+
+# security/guardrails
+RATE_LIMIT_RPM=60
+ENABLE_PROMPT_GUARD=true
+MAX_PROMPT_CHARS=6000
+
+# observability
+LOG_LEVEL=INFO
+LLM_COST_INPUT_PER_1K=0
+LLM_COST_OUTPUT_PER_1K=0
+```
+
+## Memory System
 
 ### What Gets Stored
 
 The system extracts and stores **long-term, reusable information**:
 
-- ✅ **Preferences**: Language, style, format preferences
-- ✅ **Constraints**: Time limits, budget, availability
-- ✅ **Stable Facts**: Name, location, role, skills
+- [x] **Preferences**: Language, style, format preferences
+- [x] **Constraints**: Time limits, budget, availability
+- [x] **Stable Facts**: Name, location, role, skills
 
 ### What Doesn't Get Stored
 
-- ❌ Greetings (hello, hi, thanks)
-- ❌ Emotions (happy, sad, excited)
-- ❌ One-off messages
-- ❌ Temporary states
+- [ ] Greetings (hello, hi, thanks)
+- [ ] Emotions (happy, sad, excited)
+- [ ] One-off messages
+- [ ] Temporary states
 
 ### Memory Confidence
 
@@ -148,7 +223,7 @@ The system extracts and stores **long-term, reusable information**:
 - **Contradiction** (different value): -0.3
 - **Deletion**: Memories below 0.3 confidence are removed
 
-## 🎯 Example Demo Conversation
+## Example Demo Conversation
 
 ```
 User: Hi, I'm John and I prefer Python for coding.
@@ -166,14 +241,14 @@ User: What's my preferred programming language?
 Assistant: Your preferred programming language is Python.
 ```
 
-## 🔒 Security
+## Security
 
-- ✅ API keys stored in `.env` (never committed)
-- ✅ No API keys in frontend code
-- ✅ Backend handles all API calls
-- ✅ CORS enabled for development
+- [x] API keys stored in `.env` (never committed)
+- [x] No API keys in frontend code
+- [x] Backend handles all API calls
+- [x] CORS enabled for development
 
-## 🛠️ API Endpoints
+## API Endpoints
 
 ### POST `/chat`
 
@@ -182,16 +257,62 @@ Send a message to the AI.
 **Request:**
 ```json
 {
-  "message": "Your message here"
+  "message": "Your message here",
+  "chat_id": "optional_chat_id",
+  "use_tools": false,
+  "scope": "optional_scope"
 }
 ```
 
 **Response:**
 ```json
 {
-  "reply": "AI response here"
+  "reply": "AI response here",
+  "chat_id": "chat-id",
+  "usage": {
+    "input_tokens_est": 120,
+    "output_tokens_est": 60,
+    "cost_est_usd": 0.0
+  },
+  "semantic_memories": []
 }
 ```
+
+### POST `/chat/stream`
+
+Returns `text/event-stream` with events:
+
+- `start` (contains `chat_id`, `usage`)
+- `token` (partial text chunks)
+- `done`
+
+### POST `/chat/agent`
+
+Tool-enabled route for structured tool usage (`calculator`, `currency_convert`, `web_search`).
+
+### GET `/tools`
+
+List tool schemas exposed by the tool registry.
+
+### GET `/memories/semantic`
+
+List semantic memory records for the current `X-User-ID`.
+
+### DELETE `/memories/semantic/{memory_id}`
+
+Delete one semantic memory record for the current `X-User-ID`.
+
+### POST `/admin/semantic/decay`
+
+Apply time-based importance decay for one user.
+
+### POST `/admin/semantic/compress`
+
+Run semantic memory compression for one user.
+
+### GET `/metrics`
+
+Prometheus-style metrics for request volume, latency, embedding time, retrieval time, and token estimates.
 
 ### GET `/health`
 
@@ -201,18 +322,45 @@ Health check endpoint.
 ```json
 {
   "status": "ok",
-  "api_key_loaded": true
+  "api_key_loaded": true,
+  "semantic_memory_enabled": true,
+  "streaming_enabled": true,
+  "tools_enabled": true
 }
 ```
 
-## 📝 Notes
+## Notes
 
-- Memory is stored in-memory (single user, single session)
-- For production, consider persistent storage (database)
+- Memory persistence defaults to local JSON files (`memory/memories.json`, `memory/chat_sessions.json`, `memory/users.json`)
+- Semantic memory fallback persistence is `memory/semantic_memories.json`
+- Optional MongoDB persistence is available with `ENABLE_MONGO=true`
 - Backend never crashes - all errors returned as JSON
 - Uses Groq `llama-3.1-8b-instant` model for fast responses
 
-## 🐛 Troubleshooting
+## Design Decisions and Tradeoffs
+
+- Qdrant is the preferred semantic backend, but the app keeps a JSON fallback so local dev works without infrastructure.
+- Streaming currently uses SSE with chunked tokens emitted from the generated response path.
+- Background processing is enabled with FastAPI `BackgroundTasks`; Celery/Redis wiring is included for production worker migration.
+- Semantic ranking prioritizes practical relevance: similarity, importance score, and recency weighting.
+- Security controls are lightweight by default (rate limit + prompt guard + headers) and can be tightened in gateway/WAF layers.
+
+## Deployment Guide
+
+1. Run API server (`uvicorn backend.main:app`) behind a reverse proxy.
+2. Configure environment variables for Groq, semantic memory, and security knobs.
+3. Provision Redis and Qdrant for production throughput.
+4. Optionally run Celery worker/beat for scheduled decay/compression.
+5. Expose `/metrics` to Prometheus and monitor latency + token usage.
+
+## Scaling Guide
+
+- Increase API replicas horizontally behind load balancing.
+- Move from JSON fallback to Qdrant + MongoDB for durable, distributed state.
+- Offload embedding/decay/compression work to Celery workers.
+- Apply stricter rate limits and per-user quotas under higher concurrency.
+
+## Troubleshooting
 
 ### GROQ_API_KEY loaded: False
 

@@ -6,3 +6,11 @@ pydantic==2.5.0
 pymongo==4.7.2
 python-jose[cryptography]==3.3.0
 httpx==0.27.0
+prometheus-client==0.21.1
+qdrant-client==1.13.2
+loguru==0.7.2
+celery==5.4.0
+redis==5.2.1
+slowapi==0.1.9
+openai==1.61.1
+sentence-transformers==3.4.1

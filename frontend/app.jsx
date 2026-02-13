@@ -1,7 +1,9 @@
 const { useEffect, useRef, useState } = React;
 
 const API_URL = "/chat";
+const API_STREAM_URL = "/chat/stream";
 const CHATS_API = "/chats";
+const SEMANTIC_MEMORIES_API = "/memories/semantic";
 const USER_ID_KEY = "user_id";
 const WELCOME_MESSAGE =
     "Welcome to Mnemos. I keep track of what matters to you and carry context across conversations.";
@@ -132,6 +134,8 @@ function App() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
     const [copiedMessageKey, setCopiedMessageKey] = useState("");
+    const [semanticPanelOpen, setSemanticPanelOpen] = useState(false);
+    const [semanticMemories, setSemanticMemories] = useState([]);
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
     const copyResetTimerRef = useRef(null);
@@ -160,6 +164,11 @@ function App() {
         if (!userId) return;
         loadChats();
     }, [userId]);
+
+    useEffect(() => {
+        if (!userId || !semanticPanelOpen) return;
+        loadSemanticMemories();
+    }, [userId, semanticPanelOpen]);
 
     useEffect(() => {
         if (!userId) return;
@@ -310,12 +319,39 @@ function App() {
         }
     };
 
-    const streamAssistantReply = (fullText) => {
-        const messageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setMessages((prev) => [
-            ...prev,
-            { id: messageId, role: "assistant", content: "", timestamp: new Date().toISOString() }
-        ]);
+    const loadSemanticMemories = async () => {
+        try {
+            const response = await fetch(SEMANTIC_MEMORIES_API, { headers: getHeaders(false, true) });
+            const data = await parseApiResponse(response);
+            if (!response.ok) throw new Error(data.error || data.detail || "Failed to load semantic memories");
+            setSemanticMemories(data.memories || []);
+        } catch (error) {
+            console.error("Error loading semantic memories:", error);
+        }
+    };
+
+    const deleteSemanticMemory = async (memoryId) => {
+        try {
+            const response = await fetch(`${SEMANTIC_MEMORIES_API}/${memoryId}`, {
+                method: "DELETE",
+                headers: getHeaders(false, true),
+            });
+            const data = await parseApiResponse(response);
+            if (!response.ok) throw new Error(data.error || data.detail || "Failed to delete semantic memory");
+            setSemanticMemories((prev) => prev.filter((m) => m.id !== memoryId));
+        } catch (error) {
+            console.error("Error deleting semantic memory:", error);
+        }
+    };
+
+    const streamAssistantReply = (fullText, messageId = null) => {
+        const targetId = messageId || `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        if (!messageId) {
+            setMessages((prev) => [
+                ...prev,
+                { id: targetId, role: "assistant", content: "", timestamp: new Date().toISOString() }
+            ]);
+        }
         setIsStreaming(true);
 
         return new Promise((resolve) => {
@@ -326,7 +362,7 @@ function App() {
                 i = Math.min(fullText.length, i + step);
                 const partial = fullText.slice(0, i);
                 setMessages((prev) =>
-                    prev.map((m) => (m.id === messageId ? { ...m, content: partial } : m))
+                    prev.map((m) => (m.id === targetId ? { ...m, content: partial } : m))
                 );
                 if (i < fullText.length) {
                     rafId = requestAnimationFrame(tick);
@@ -339,9 +375,34 @@ function App() {
         });
     };
 
+    const parseSSEBlock = (block) => {
+        if (!block) return null;
+        const lines = block.split("\n");
+        let event = "message";
+        const dataLines = [];
+        for (const line of lines) {
+            if (line.startsWith("event:")) {
+                event = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+            }
+        }
+        const rawData = dataLines.join("\n");
+        let data = {};
+        if (rawData) {
+            try {
+                data = JSON.parse(rawData);
+            } catch {
+                data = { text: rawData };
+            }
+        }
+        return { event, data };
+    };
+
     const sendMessage = async () => {
         if (!inputMessage.trim() || isLoading) return;
         const userMessage = inputMessage.trim();
+        const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         setInputMessage("");
         resetTextareaHeight();
         setIsLoading(true);
@@ -349,26 +410,69 @@ function App() {
 
         setMessages((prev) => [
             ...prev,
-            { role: "user", content: userMessage, timestamp: new Date().toISOString() }
+            { role: "user", content: userMessage, timestamp: new Date().toISOString() },
+            { id: assistantMessageId, role: "assistant", content: "", timestamp: new Date().toISOString() }
         ]);
 
         try {
-            const response = await fetch(API_URL, {
+            const response = await fetch(API_STREAM_URL, {
                 method: "POST",
                 headers: getHeaders(true, true),
-                body: JSON.stringify({ message: userMessage, chat_id: currentChatId })
+                body: JSON.stringify({ message: userMessage, chat_id: currentChatId, use_tools: false })
             });
-            const data = await parseApiResponse(response);
-            if (!response.ok) throw new Error(data.error || data.detail || "Failed to get response");
-
-            setIsWaitingResponse(false);
-            await streamAssistantReply(data.reply || "");
-            if (data.chat_id !== currentChatId) setCurrentChatId(data.chat_id);
+            if (!response.ok) {
+                const data = await parseApiResponse(response);
+                throw new Error(data.error || data.detail || "Failed to get response");
+            }
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("text/event-stream") || !response.body) {
+                const data = await parseApiResponse(response);
+                await streamAssistantReply(data.reply || "", assistantMessageId);
+                if (data.chat_id && data.chat_id !== currentChatId) setCurrentChatId(data.chat_id);
+            } else {
+                setIsWaitingResponse(false);
+                setIsStreaming(true);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+                let done = false;
+                while (!done) {
+                    const read = await reader.read();
+                    done = read.done;
+                    const chunk = decoder.decode(read.value || new Uint8Array(), { stream: !done });
+                    buffer += chunk;
+                    const blocks = buffer.split("\n\n");
+                    buffer = blocks.pop() || "";
+                    for (const block of blocks) {
+                        const evt = parseSSEBlock(block);
+                        if (!evt) continue;
+                        if (evt.event === "start") {
+                            const chatId = evt.data?.chat_id;
+                            if (chatId && chatId !== currentChatId) {
+                                setCurrentChatId(chatId);
+                            }
+                        } else if (evt.event === "token") {
+                            const token = evt.data?.text || "";
+                            if (!token) continue;
+                            setMessages((prev) =>
+                                prev.map((m) =>
+                                    m.id === assistantMessageId ? { ...m, content: `${m.content || ""}${token}` } : m
+                                )
+                            );
+                        } else if (evt.event === "done") {
+                            setIsStreaming(false);
+                        } else if (evt.event === "error") {
+                            throw new Error(evt.data?.message || "Streaming failed");
+                        }
+                    }
+                }
+            }
             await loadChats();
+            if (semanticPanelOpen) await loadSemanticMemories();
         } catch (error) {
             console.error("Error sending message:", error);
             setIsWaitingResponse(false);
-            await streamAssistantReply(`Error: ${error.message}`);
+            await streamAssistantReply(`Error: ${error.message}`, assistantMessageId);
         } finally {
             setIsLoading(false);
             setIsWaitingResponse(false);
@@ -481,9 +585,25 @@ function App() {
                         <h1 className="text-xl font-semibold tracking-tight text-[#F0ECE5]">Mnemos</h1>
                         <span className="text-xs text-[#948979]">User: {userId}</span>
                     </div>
-                    <button onClick={logout} className="text-sm bg-[#161A30] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#F0ECE5] px-3 py-1.5 rounded-lg transition-all duration-200">
-                        Logout
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={async () => {
+                                const next = !semanticPanelOpen;
+                                setSemanticPanelOpen(next);
+                                if (next) await loadSemanticMemories();
+                            }}
+                            className={`text-sm border px-3 py-1.5 rounded-lg transition-all duration-200 ${
+                                semanticPanelOpen
+                                    ? "bg-[#F0ECE5] text-[#161A30] border-[#F0ECE5]"
+                                    : "bg-[#161A30] hover:bg-[#393E46] text-[#F0ECE5] border-[#948979]/45"
+                            }`}
+                        >
+                            Memory Inspector
+                        </button>
+                        <button onClick={logout} className="text-sm bg-[#161A30] hover:bg-[#393E46] active:scale-[0.99] border border-[#948979]/45 text-[#F0ECE5] px-3 py-1.5 rounded-lg transition-all duration-200">
+                            Logout
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
@@ -583,6 +703,40 @@ function App() {
                     </div>
                 </div>
             </div>
+
+            {semanticPanelOpen && (
+                <div className="w-[360px] border-l border-[#948979]/35 bg-[#20253D] flex flex-col">
+                    <div className="px-4 py-3 border-b border-[#948979]/35 flex items-center justify-between">
+                        <h2 className="text-sm font-semibold text-[#F0ECE5]">Semantic Memory Inspector</h2>
+                        <span className="text-xs text-[#948979]">{semanticMemories.length} items</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                        {semanticMemories.length === 0 ? (
+                            <div className="text-sm text-[#948979]">No semantic memories yet.</div>
+                        ) : (
+                            semanticMemories.map((m) => (
+                                <div key={m.id} className="rounded-xl border border-[#948979]/35 bg-[#161A30] p-3">
+                                    <div className="text-xs text-[#948979] flex items-center justify-between">
+                                        <span>{m.memory_type || "memory"} • {m.scope || "user"}</span>
+                                        <button
+                                            onClick={() => deleteSemanticMemory(m.id)}
+                                            className="text-red-300 hover:text-red-200"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <div className="text-sm text-[#F0ECE5] mt-2 whitespace-pre-wrap break-words">
+                                        {m.content}
+                                    </div>
+                                    <div className="text-[11px] text-[#948979] mt-2">
+                                        Importance: {Number(m.importance_score || 0).toFixed(2)}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
 
             {deleteConfirmChatId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm fade-in">
