@@ -39,3 +39,13 @@ def run_compression(user_id: str):
         log_event("task_compression_failed", user_id=user_id, error=str(exc))
         return {"compressed": 0, "error": str(exc)}
 
+
+def run_reembedding(user_id: str, reason: str = "model_update"):
+    service = get_semantic_memory_service()
+    try:
+        result = service.reembed_user_memories(user_id=user_id, reason=reason)
+        log_event("task_reembedding_done", user_id=user_id, **result)
+        return result
+    except Exception as exc:
+        log_event("task_reembedding_failed", user_id=user_id, error=str(exc))
+        return {"reembedded": 0, "error": str(exc)}

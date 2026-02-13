@@ -360,6 +360,81 @@ Health check endpoint.
 - Offload embedding/decay/compression work to Celery workers.
 - Apply stricter rate limits and per-user quotas under higher concurrency.
 
+## Refined Orchestrator Diagram
+
+```text
+User Input
+-> Context Builder
+   - deterministic memory
+   - semantic vector retrieval
+   - recency buffer
+   - tool hints
+-> Context Ranking Layer
+-> Prompt Assembly Layer
+-> LLM Invocation (timeout + retry policy)
+-> Stream Handler (SSE: token/tool_call/done/error)
+-> Persistence Layer (chat + memory updates)
+-> Background Hooks (ingest/decay/compress/re-embed)
+```
+
+## Semantic Memory Node Schema
+
+```json
+{
+  "memory_id": "uuid",
+  "user_id": "string",
+  "content": "string",
+  "embedding": [0.0],
+  "type": "fact|preference|emotional|goal|project|transient",
+  "importance_score": 0.0,
+  "reinforcement_count": 0,
+  "created_at": "timestamp",
+  "last_accessed": "timestamp|null",
+  "decay_factor": 0.0,
+  "scope": "global|user|conversation|project",
+  "source_message_id": "string",
+  "metadata": {}
+}
+```
+
+## Internal Service Boundaries
+
+- `app/orchestrator`: context builder, ranker, prompt assembler, pipeline, stream handler
+- `app/memory`: memory models + semantic memory service + maintenance lifecycle
+- `app/embeddings`: embedding provider abstraction and client adapters
+- `app/vectorstore`: vector backend adapters (Qdrant + local fallback)
+- `app/tools`: tool registry, schema validation, sandbox checks, executors
+- `app/llm`: LLM client adapter with retry/timeout isolation
+- `app/security`: replay protection, token rotation strategy
+- `app/observability`: structured logs, metrics, optional tracing
+- `app/tasks`: async ingestion/decay/compress/re-embedding hooks + Celery wiring
+
+## Ranking and Decay Configuration
+
+- Retrieval score:
+  - `final_score = similarity*W1 + importance*W2 + recency*W3`
+  - env vars: `MEM_RANK_WEIGHT_SIMILARITY`, `MEM_RANK_WEIGHT_IMPORTANCE`, `MEM_RANK_WEIGHT_RECENCY`
+- Decay:
+  - periodic multiplicative decay: `importance_score *= decay_factor`
+  - archive threshold: `MEMORY_ARCHIVE_THRESHOLD`
+  - delete threshold: `MEMORY_DELETE_THRESHOLD`
+
+## Suggested Libraries
+
+- API/runtime: FastAPI, Uvicorn, Pydantic v2
+- Queue/workers: Celery + Redis
+- Vector DB: Qdrant client
+- Metrics: prometheus-client
+- Tracing (optional): opentelemetry
+- Embeddings: OpenAI or sentence-transformers local models
+
+## Risks and Tradeoffs
+
+- Local fallback mode improves DX but is not suitable for multi-node consistency.
+- In-memory replay/rate-limit state is lightweight but should move to Redis for distributed deployments.
+- LLM-based compression improves semantic quality but adds cost and background latency.
+- Tool routing via LLM is flexible, but deterministic allowlists and strict schema validation remain mandatory.
+
 ## Troubleshooting
 
 ### GROQ_API_KEY loaded: False

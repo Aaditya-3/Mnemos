@@ -11,6 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from backend.app.observability.logging import log_event
 
+_BLOCKED_TOOL_ARG_PATTERNS = ("__", "import", "exec", "eval", "subprocess", "os.")
+
 
 @dataclass
 class ToolSpec:
@@ -43,6 +45,7 @@ class ToolRegistry:
         spec = self._tools.get(tool_name)
         if not spec:
             raise ValueError(f"Unknown tool: {tool_name}")
+        self._sandbox_validate_payload(tool_name=tool_name, payload=payload or {})
         try:
             parsed = spec.input_model.model_validate(payload or {})
         except ValidationError as exc:
@@ -51,6 +54,23 @@ class ToolRegistry:
         log_event("tool_executed", tool_name=tool_name)
         return result
 
+    def _sandbox_validate_payload(self, tool_name: str, payload: dict[str, Any]):
+        def _walk(value):
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    _walk(str(k))
+                    _walk(v)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    _walk(item)
+                return
+            text = str(value).lower()
+            for pattern in _BLOCKED_TOOL_ARG_PATTERNS:
+                if pattern in text:
+                    raise ValueError(f"Blocked tool payload for `{tool_name}` due to sandbox pattern `{pattern}`")
+
+        _walk(payload)
+
 
 tool_registry = ToolRegistry()
-

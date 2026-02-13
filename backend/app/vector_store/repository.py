@@ -151,15 +151,19 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
             "scope": memory.scope,
             "memory_type": memory.memory_type,
             "importance_score": memory.importance_score,
+            "reinforcement_count": memory.reinforcement_count,
             "decay_factor": memory.decay_factor,
             "tags": memory.tags,
             "source_message_id": memory.source_message_id,
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
+            "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
             "content": memory.content,
             "embedding_model": memory.embedding_model,
             "embedding_provider": memory.embedding_provider,
             "is_active": memory.is_active,
+            "is_archived": memory.is_archived,
+            "archived_at": memory.archived_at.isoformat() if memory.archived_at else None,
             "metadata": memory.metadata,
         }
         return PointStruct(id=memory.id, vector=memory.embedding, payload=payload)
@@ -204,6 +208,7 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                         "memory_type": payload.get("memory_type"),
                         "scope": payload.get("scope"),
                         "importance_score": payload.get("importance_score", 0.5),
+                        "reinforcement_count": payload.get("reinforcement_count", 0),
                         "decay_factor": payload.get("decay_factor", 0.01),
                         "tags": payload.get("tags", []),
                         "source_message_id": payload.get("source_message_id", ""),
@@ -212,7 +217,10 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                         "embedding_provider": payload.get("embedding_provider", ""),
                         "created_at": payload.get("created_at"),
                         "updated_at": payload.get("updated_at"),
+                        "last_accessed": payload.get("last_accessed"),
                         "is_active": payload.get("is_active", True),
+                        "is_archived": payload.get("is_archived", False),
+                        "archived_at": payload.get("archived_at"),
                         "metadata": payload.get("metadata", {}),
                     }
                 )
@@ -249,6 +257,7 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                             "memory_type": payload.get("memory_type"),
                             "scope": payload.get("scope"),
                             "importance_score": payload.get("importance_score", 0.5),
+                            "reinforcement_count": payload.get("reinforcement_count", 0),
                             "decay_factor": payload.get("decay_factor", 0.01),
                             "tags": payload.get("tags", []),
                             "source_message_id": payload.get("source_message_id", ""),
@@ -256,7 +265,10 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                             "embedding_provider": payload.get("embedding_provider", ""),
                             "created_at": payload.get("created_at"),
                             "updated_at": payload.get("updated_at"),
+                            "last_accessed": payload.get("last_accessed"),
                             "is_active": payload.get("is_active", True),
+                            "is_archived": payload.get("is_archived", False),
+                            "archived_at": payload.get("archived_at"),
                             "metadata": payload.get("metadata", {}),
                         }
                     )
@@ -271,7 +283,19 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
         if self.client is None:
             return False
         try:
-            # Hard delete by point id. User isolation checked by caller.
+            # Enforce user isolation before delete.
+            points = self.client.retrieve(
+                collection_name=self.collection,
+                ids=[memory_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                return False
+            payload = getattr(points[0], "payload", {}) or {}
+            if str(payload.get("user_id") or "").strip() != str(user_id).strip():
+                log_event("qdrant_delete_blocked_user_mismatch", memory_id=memory_id, requested_user=user_id)
+                return False
             self.client.delete(collection_name=self.collection, points_selector=[memory_id], wait=True)
             return True
         except Exception as exc:
@@ -305,4 +329,3 @@ def get_vector_store() -> VectorStoreRepository:
 
     _repo_cache = repo
     return _repo_cache
-

@@ -13,15 +13,16 @@ def sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def chunk_text_tokens(text: str) -> Iterable[str]:
+def chunk_text_tokens(text: str, chunk_words: int = 3) -> Iterable[str]:
     words = (text or "").split()
     if not words:
         return []
+    chunk_size = max(1, int(chunk_words))
     chunks: list[str] = []
     current = []
     for word in words:
         current.append(word)
-        if len(current) >= 3:
+        if len(current) >= chunk_size:
             chunks.append(" ".join(current) + " ")
             current = []
     if current:

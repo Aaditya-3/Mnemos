@@ -64,8 +64,11 @@ QDRANT_COLLECTION=mnemos_semantic_memory
 - `DELETE /memories/semantic/{memory_id}`
 - `POST /admin/semantic/decay`
 - `POST /admin/semantic/compress`
+- `POST /admin/semantic/reembed`
 - `GET /metrics`
 - `GET /health`
+- `POST /auth/token/issue`
+- `POST /auth/token/rotate`
 
 ## Verification Checklist
 

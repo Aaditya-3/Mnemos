@@ -22,5 +22,9 @@ def configure_periodic_tasks():
             "schedule": 24 * 60 * 60,
             "args": ("system",),
         },
+        "semantic-reembed-weekly": {
+            "task": "semantic.reembed_user",
+            "schedule": 7 * 24 * 60 * 60,
+            "args": ("system", "scheduled_reembed"),
+        },
     }
-

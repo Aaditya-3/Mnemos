@@ -37,7 +37,6 @@ import uuid
 from memory.memory_extractor import extract_memory
 from memory.memory_retriever import retrieve_memories
 from memory.memory_store import get_memory_store
-from backend.app.core.llm.groq_client import generate_response
 from backend.app.core.tools.realtime_info import should_fetch_realtime, get_realtime_context
 from backend.app.core.db.mongo import get_db
 from backend.app.core.config import get_settings
@@ -46,13 +45,16 @@ from backend.app.core.tools.preference_reasoning import (
     parse_preference_query,
     classify_memory_for_query,
 )
+from backend.app.orchestrator.factory import build_chat_orchestrator
+from backend.app.orchestrator.stream_handler import OrchestratorStreamHandler
+from backend.app.orchestrator.types import OrchestratorInput
 from backend.app.observability.logging import setup_logging, log_event
 from backend.app.observability.metrics import metrics
 from backend.app.services.semantic_memory_service import get_semantic_memory_service
-from backend.app.services.streaming import stream_text_sse
 from backend.app.services.token_usage import estimate_tokens, estimate_cost_usd
 from backend.app.services.tool_router import run_agent_turn
-from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay
+from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay, run_reembedding
+from backend.app.security.jwt_rotation import issue_access_token, issue_refresh_token, rotate_tokens
 
 project_root = _project_root
 settings = get_settings()
@@ -180,6 +182,7 @@ def _is_irrelevant_reply(user_message: str, reply: str) -> bool:
 
 
 from backend.app.core.auth.simple_auth import router as simple_auth_router
+from backend.app.api.platform import router as platform_router
 
 
 app = FastAPI(title="AI Chat with Memory")
@@ -198,6 +201,45 @@ if frontend_path.exists():
 
 # Mount auth router
 app.include_router(simple_auth_router)
+app.include_router(platform_router)
+
+
+@app.post("/auth/token/issue")
+async def issue_tokens(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    return {
+        "access_token": issue_access_token(user_id),
+        "refresh_token": issue_refresh_token(user_id),
+    }
+
+
+@app.post("/auth/token/rotate")
+async def rotate_user_tokens(payload: dict):
+    user_id = str((payload or {}).get("user_id") or "").strip()
+    refresh_token = str((payload or {}).get("refresh_token") or "").strip()
+    if not user_id or not refresh_token:
+        raise HTTPException(status_code=400, detail="user_id and refresh_token are required")
+    try:
+        access, refresh = rotate_tokens(user_id, refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    return {"access_token": access, "refresh_token": refresh}
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", "")
+    classification = type(exc).__name__
+    log_event(
+        "unhandled_exception",
+        request_id=request_id,
+        path=request.url.path,
+        error_class=classification,
+        error=str(exc),
+    )
+    return JSONResponse(status_code=500, content={"error": f"Internal error: {classification}"})
 
 
 class ChatSession:
@@ -829,6 +871,58 @@ class AgentChatResponse(BaseModel):
     usage: dict[str, Any]
 
 
+def _deterministic_memory_context(query: str, user_id: str) -> str:
+    try:
+        return retrieve_memories(query, user_id)
+    except Exception:
+        return ""
+
+
+def _semantic_memory_context(user_id: str, query: str) -> tuple[list[dict[str, Any]], str]:
+    service = get_semantic_memory_service()
+    return service.retrieve_context(
+        user_id=user_id,
+        query=query,
+        top_k=settings.semantic_top_k,
+        scopes=["user", "project", "conversation", "global"],
+    )
+
+
+def _semantic_memory_node(memory) -> dict[str, Any]:
+    return {
+        "id": memory.id,
+        "memory_id": memory.id,
+        "user_id": memory.user_id,
+        "content": memory.content,
+        "embedding": memory.embedding,
+        "memory_type": memory.memory_type,
+        "type": memory.memory_type,
+        "importance_score": memory.importance_score,
+        "reinforcement_count": memory.reinforcement_count,
+        "created_at": memory.created_at.isoformat(),
+        "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
+        "decay_factor": memory.decay_factor,
+        "scope": memory.scope,
+        "source_message_id": memory.source_message_id,
+        "metadata": memory.metadata or {},
+        "is_active": memory.is_active,
+        "is_archived": memory.is_archived,
+        "archived_at": memory.archived_at.isoformat() if memory.archived_at else None,
+    }
+
+
+orchestrator = build_chat_orchestrator(
+    deterministic_memory_fn=_deterministic_memory_context,
+    semantic_retrieve_fn=_semantic_memory_context,
+    recency_buffer_fn=_build_chat_history_context,
+    realtime_fn=lambda msg: get_realtime_context(msg) or "",
+    should_realtime_fn=lambda msg: bool(realtime_web_enabled and should_fetch_realtime(msg)),
+    tool_agent_fn=run_agent_turn,
+    sanitize_reply_fn=sanitize_response,
+)
+stream_handler = OrchestratorStreamHandler()
+
+
 def detect_category_query(user_message: str) -> Optional[str]:
     msg = (user_message or "").lower()
     if not msg:
@@ -1027,11 +1121,11 @@ async def chat(
     """
     Main chat endpoint.
     1. Receive user message
-    2. Extract memory if present
-    3. Retrieve relevant memories
-    4. Build single combined prompt (memory + user message)
-    5. Call Groq generate_response(prompt)
-    6. Store messages and return response
+    2. Build layered context (deterministic + semantic + recency + hints)
+    3. Rank context and assemble prompt
+    4. Invoke LLM through orchestrator abstraction
+    5. Persist chat + schedule background memory hooks
+    6. Return response + usage metadata
     """
     try:
         user_id = (x_user_id or "").strip()
@@ -1065,39 +1159,6 @@ async def chat(
         continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
         is_ack_reply = _is_short_acknowledgement(user_message)
 
-        # Optional agentic tool execution path.
-        if request.use_tools and settings.enable_tools:
-            agent_result = run_agent_turn(continuity_message)
-            reply = sanitize_response(continuity_message, agent_result.get("reply", ""))
-            input_tokens = estimate_tokens(continuity_message)
-            output_tokens = estimate_tokens(reply)
-            metrics.inc("llm_tokens_input_total", input_tokens)
-            metrics.inc("llm_tokens_output_total", output_tokens)
-            usage = {
-                "input_tokens_est": input_tokens,
-                "output_tokens_est": output_tokens,
-                "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
-                "tool_calls": len(agent_result.get("tool_events") or []),
-            }
-
-            chat_session.messages.append(
-                {"role": "user", "content": user_message, "timestamp": datetime.now().isoformat()}
-            )
-            chat_session.messages.append(
-                {"role": "assistant", "content": reply, "timestamp": datetime.now().isoformat()}
-            )
-            _persist_chat_session(chat_session)
-            enforce_user_chat_token_budget(user_id)
-            if settings.enable_background_tasks:
-                background_tasks.add_task(
-                    enqueue_ingest_message,
-                    user_id,
-                    continuity_message,
-                    "",
-                    request.scope,
-                )
-            return ChatResponse(reply=reply, chat_id=chat_id, usage=usage, semantic_memories=[])
-
         # --------------------------------------------------------------
         # A. Handle explicit category-profile queries (top 3)
         # --------------------------------------------------------------
@@ -1119,188 +1180,25 @@ async def chat(
         # --------------------------------------------------------------
         preference_hint = None if is_ack_reply else handle_preference_query(continuity_message, user_id)
 
-        # --------------------------------------------------------------
-        # B. Retrieve existing memories FIRST (no new extraction yet)
-        # --------------------------------------------------------------
-        memory_context = ""
-        semantic_rows: list[dict[str, Any]] = []
-        semantic_context = ""
-        if settings.enable_semantic_memory and not is_ack_reply:
-            try:
-                semantic_service = get_semantic_memory_service()
-                semantic_rows, semantic_context = semantic_service.retrieve_context(
-                    user_id=user_id,
-                    query=continuity_message,
-                    top_k=settings.semantic_top_k,
-                    scopes=["user", "project", "conversation", "global"],
-                )
-            except Exception as e:
-                log_event("semantic_retrieval_failed", user_id=user_id, error=str(e))
-                semantic_rows = []
-                semantic_context = ""
-
-        try:
-            memory_context = retrieve_memories(continuity_message, user_id)
-            if memory_context:
-                print("=== MEMORY CONTEXT USED FOR THIS TURN ===")
-                print(memory_context)
-                print("=== END MEMORY CONTEXT ===")
-            else:
-                print("INFO: No memories to include in context")
-        except Exception as e:
-            print(f"WARNING: Memory retrieval error (non-fatal): {e}")
-            memory_context = ""
-
-        if semantic_context:
-            memory_context = f"{memory_context}\n{semantic_context}".strip() if memory_context else semantic_context
-
-        long_term_profile = _build_long_term_profile(user_id, query_message=continuity_message)
-        chat_history_context = _build_chat_history_context(chat_session)
-        session_temp_facts = _build_session_temp_facts(chat_session)
         deterministic_hints = [h for h in [category_hint, builtin_realtime_hint, schedule_hint, preference_hint] if h]
-        deterministic_hint_context = "\n".join(f"- {h}" for h in deterministic_hints)
-        current_datetime = datetime.now().astimezone().isoformat(timespec="seconds")
-
-        # --------------------------------------------------------------
-        # C. Optionally fetch realtime web context for dynamic queries
-        # --------------------------------------------------------------
-        realtime_context = ""
-        try:
-            if realtime_web_enabled and should_fetch_realtime(continuity_message):
-                realtime_context = get_realtime_context(continuity_message) or ""
-                if realtime_context:
-                    print("=== REALTIME CONTEXT USED FOR THIS TURN ===")
-                    print(realtime_context)
-                    print("=== END REALTIME CONTEXT ===")
-                else:
-                    print("INFO: Realtime lookup attempted but no context found")
-        except Exception as e:
-            print(f"WARNING: Realtime lookup error (non-fatal): {e}")
-            realtime_context = ""
-
-        # --------------------------------------------------------------
-        # D. Build ONE combined prompt and call Groq
-        #    (LLM only sees existing memories, not newly extracted ones)
-        # --------------------------------------------------------------
-        system_instructions = (
-            "SECTION 1: Identity Rules\n"
-            "You are a smart, grounded assistant.\n"
-            "Your fixed assistant name is Mnemos.\n"
-            "Your creator is Aaditya Kothari.\n"
-            "If asked about your own identity (name/creator), answer with these fixed facts and never substitute user-profile memories.\n"
-            "User memories must never override assistant identity facts.\n"
-            "SECTION 2: Memory Hierarchy and Priority\n"
-            "You must synthesize facts from <LONG_TERM_PROFILE>, <CHAT_HISTORY>, and <SESSION_TEMP_FACTS> to maintain continuity.\n"
-            "Use <LONG_TERM_PROFILE> for durable user-specific facts and rules.\n"
-            "Use <CHAT_HISTORY> for recent references, implied entities, and conversation flow.\n"
-            "Use <SESSION_TEMP_FACTS> for temporary chat-local statements the user shared in this session.\n"
-            "If <REALTIME_CONTEXT> is provided, treat it as the highest-priority source for current facts.\n"
-            "If <DETERMINISTIC_HINTS> is provided, treat it as verified logic and rephrase it naturally; do not copy it verbatim.\n"
-            "Treat memories tagged with importance=critical or domain=critical_context as persistent user rules.\n"
-            "Priority order: REALTIME_CONTEXT > critical LONG_TERM_PROFILE > other LONG_TERM_PROFILE > SESSION_TEMP_FACTS > CHAT_HISTORY.\n"
-            "SECTION 3: Conflict Resolution\n"
-            "If a critical memory conflicts with older non-critical memory, prefer the critical memory.\n"
-            "If two memories of equal priority conflict, prefer the more recent one.\n"
-            "If a GLOBAL_RULE exists, execute it only when the user explicitly asks about that matching preference subject/domain:\n"
-            "GLOBAL_RULES must never trigger implicitly.\n"
-            "Step A: identify the entity in the current query.\n"
-            "Step B: check for matching exceptions in <LONG_TERM_PROFILE>.\n"
-            "Step C: if no direct specific fact exists, state that you do not have that stored information.\n"
-            "SECTION 4: Memory Usage Constraints\n"
-            "When the user says phrases like 'that show', 'that character', or 'the one I mentioned', resolve "
-            "the reference from <CHAT_HISTORY> before checking <LONG_TERM_PROFILE>.\n"
-            "Memory may only be used if both domain and entity match the user query.\n"
-            "Ignore memories that are unscoped or confidence < 0.5.\n"
-            "Do not mix facts across different topics/entities; use only memory relevant to the current question.\n"
-            "Do not force profile data into unrelated questions.\n"
-            "Do not infer personal traits in one domain from unrelated preferences in another domain.\n"
-            "Do not infer missing personal preference facts from unrelated or broad rules.\n"
-            "Do not merge multiple memory entries into a generalized assumption unless explicitly supported by stored facts.\n"
-            "Do not reinterpret or mutate stored memories during reasoning. Use them exactly as stored.\n"
-            "For personal preference/fact queries, first use exact entity-specific memory facts with confidence >= 0.5.\n"
-            "SECTION 5: Hallucination Prevention\n"
-            "Never fabricate user preferences, memories, or profile facts.\n"
-            "If no matching memory exists, explicitly state that the information is not stored.\n"
-            "If no direct evidence exists for the asked topic, say you do not have that specific preference stored yet.\n"
-            "Before using a memory fact, verify it improves the relevance of the answer. If not, omit it.\n"
-            "If uncertain whether a memory applies, prefer asking one short clarification instead of assuming.\n"
-            "SECTION 6: Tone and Response Constraints\n"
-            "For general questions outside profile/preferences, answer directly using your general knowledge and any realtime context.\n"
-            "Reason from meaning, not keyword overlap.\n"
-            "Never say \"Based on your profile\" or \"As you mentioned.\" Simply use the facts as if they are common knowledge between us.\n"
-            "Prefer natural answers, not memory tags or rule text.\n"
-            "For non-profile/general questions, do not ask follow-up questions unless strictly necessary.\n"
-            "If clarification is required for profile details, ask at most one short clarifying question.\n"
-            "Do not expose internal reasoning steps or section logic in responses.\n"
-            f"Current local datetime: {current_datetime}.\n"
-            f"You are talking to {user_id}. Keep a warm, precise tone.\n"
-            "Keep responses concise: 2-5 sentences unless the user asks for depth.\n"
+        orchestrator_payload = OrchestratorInput(
+            user_id=user_id,
+            chat_id=chat_id,
+            user_message=user_message,
+            continuity_message=continuity_message,
+            use_tools=bool(request.use_tools and settings.enable_tools),
+            scope=request.scope,
         )
-
-        full_prompt = f"""{system_instructions}
-<REALTIME_CONTEXT>
-{realtime_context}
-</REALTIME_CONTEXT>
-<LONG_TERM_PROFILE>
-{long_term_profile}
-</LONG_TERM_PROFILE>
-<USER_PROFILE_RELEVANT>
-{memory_context}
-</USER_PROFILE_RELEVANT>
-<CHAT_HISTORY>
-{chat_history_context}
-</CHAT_HISTORY>
-<SESSION_TEMP_FACTS>
-{session_temp_facts}
-</SESSION_TEMP_FACTS>
-<DETERMINISTIC_HINTS>
-{deterministic_hint_context}
-</DETERMINISTIC_HINTS>
-<RESOLVED_USER_MESSAGE>
-{continuity_message}
-</RESOLVED_USER_MESSAGE>
-
-User message:
-{continuity_message}"""
-
-        try:
-            reply = generate_response(full_prompt)
-            reply = sanitize_response(continuity_message, reply)
-            if _is_repetitive_reply(reply, chat_session):
-                prev = _last_assistant_reply(chat_session)
-                anti_repeat_prompt = (
-                    full_prompt
-                    + "\n\nDo not repeat the previous assistant response verbatim.\n"
-                    + f"Previous assistant response: {prev}\n"
-                    + "Respond with a fresh, context-aware answer in 1-3 sentences."
-                )
-                retry = generate_response(anti_repeat_prompt)
-                if retry:
-                    reply = sanitize_response(continuity_message, retry)
-            if _is_irrelevant_reply(continuity_message, reply):
-                relevance_retry_prompt = (
-                    full_prompt
-                    + "\n\nYour previous response was not relevant to the user message.\n"
-                    + f"Previous response: {reply}\n"
-                    + "Respond again with only directly relevant information.\n"
-                    + "If direct personal evidence is missing for the asked topic, say that clearly in one sentence.\n"
-                    + "Do not borrow unrelated profile domains."
-                )
-                retry = generate_response(relevance_retry_prompt)
-                if retry:
-                    reply = sanitize_response(continuity_message, retry)
-        except RuntimeError as e:
-            return JSONResponse(status_code=500, content={"error": f"AI service error: {str(e)}"})
-
-        input_tokens = estimate_tokens(full_prompt)
-        output_tokens = estimate_tokens(reply)
-        metrics.inc("llm_tokens_input_total", input_tokens)
-        metrics.inc("llm_tokens_output_total", output_tokens)
-        usage = {
-            "input_tokens_est": input_tokens,
-            "output_tokens_est": output_tokens,
-            "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
-        }
+        pipeline_result = orchestrator.run(
+            payload=orchestrator_payload,
+            chat_session=chat_session,
+            deterministic_hints=deterministic_hints,
+        )
+        reply = pipeline_result.reply
+        usage = pipeline_result.usage
+        semantic_rows = pipeline_result.semantic_rows
+        tool_events = pipeline_result.tool_events
+        usage["tool_events"] = tool_events
 
         # --------------------------------------------------------------
         # E. AFTER response is generated, extract any new memory
@@ -1345,8 +1243,9 @@ User message:
             user_id=user_id,
             chat_id=chat_id,
             semantic_memories=len(semantic_rows),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=usage.get("input_tokens_est", 0),
+            output_tokens=usage.get("output_tokens_est", 0),
+            tool_events=len(tool_events),
         )
         return ChatResponse(reply=reply, chat_id=chat_id, usage=usage, semantic_memories=semantic_rows)
 
@@ -1517,7 +1416,7 @@ async def get_semantic_memories(x_user_id: str = Header(..., alias="X-User-ID"))
     return {
         "user_id": user_id,
         "total": len(memories),
-        "memories": [m.to_dict() for m in memories],
+        "memories": [_semantic_memory_node(m) for m in memories],
     }
 
 
@@ -1537,33 +1436,40 @@ async def delete_semantic_memory(memory_id: str, x_user_id: str = Header(..., al
 async def chat_stream(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
-    http_request: Request,
+    raw_request: Request,
     x_user_id: str = Header(..., alias="X-User-ID"),
 ):
     if not settings.enable_streaming:
         return JSONResponse(status_code=400, content={"error": "Streaming is disabled"})
-    result = await chat(request=request, background_tasks=background_tasks, http_request=http_request, x_user_id=x_user_id)
-    if isinstance(result, JSONResponse):
-        return result
-    request_id = getattr(http_request.state, "request_id", "")
+    request_id = getattr(raw_request.state, "request_id", "")
     headers = {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
-    return StreamingResponse(
-        stream_text_sse(
-            result.reply,
-            request_id=request_id,
-            start_payload={
-                "chat_id": result.chat_id,
-                "usage": result.usage or {},
-                "semantic_count": len(result.semantic_memories or []),
-            },
-        ),
-        media_type="text/event-stream",
-        headers=headers,
-    )
+    try:
+        result = await chat(request=request, background_tasks=background_tasks, http_request=raw_request, x_user_id=x_user_id)
+        if isinstance(result, JSONResponse):
+            return result
+        tool_events = result.usage.get("tool_events", []) if isinstance(result.usage, dict) else []
+        return StreamingResponse(
+            stream_handler.stream(
+                text=result.reply,
+                request_id=request_id,
+                chat_id=result.chat_id,
+                usage=result.usage or {},
+                tool_events=tool_events,
+                is_disconnected=raw_request.is_disconnected,
+            ),
+            media_type="text/event-stream",
+            headers=headers,
+        )
+    except Exception as exc:
+        return StreamingResponse(
+            stream_handler.stream_error(str(exc), request_id=request_id),
+            media_type="text/event-stream",
+            headers=headers,
+        )
 
 
 @app.post("/chat/agent", response_model=AgentChatResponse)
@@ -1592,6 +1498,8 @@ async def chat_agent(
         "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
         "latency_ms": round((time.perf_counter() - started) * 1000, 2),
     }
+    metrics.observe("llm_latency_seconds", usage["latency_ms"] / 1000.0)
+    metrics.inc("llm_cost_usd_total", usage["cost_est_usd"])
     if settings.enable_background_tasks and settings.enable_semantic_memory:
         background_tasks.add_task(enqueue_ingest_message, user_id, message, "", "user")
     return AgentChatResponse(reply=reply, tool_events=result.get("tool_events") or [], usage=usage)
@@ -1618,6 +1526,18 @@ async def run_semantic_compression(x_user_id: str = Header(..., alias="X-User-ID
     if not user_id:
         raise HTTPException(status_code=400, detail="X-User-ID header is required")
     return run_compression(user_id)
+
+
+@app.post("/admin/semantic/reembed")
+async def run_semantic_reembedding(
+    payload: dict,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    user_id = str((payload or {}).get("user_id") or (x_user_id or "")).strip()
+    reason = str((payload or {}).get("reason") or "model_update").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    return run_reembedding(user_id=user_id, reason=reason)
 
 
 @app.get("/metrics")

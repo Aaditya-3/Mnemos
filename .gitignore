@@ -14,3 +14,7 @@ venv/
 env/
 ENV/
 ".env" 
+
+# frontend build artifacts
+frontend-vite/node_modules/
+frontend-vite/dist/

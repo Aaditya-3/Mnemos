@@ -338,7 +338,7 @@ function App() {
             });
             const data = await parseApiResponse(response);
             if (!response.ok) throw new Error(data.error || data.detail || "Failed to delete semantic memory");
-            setSemanticMemories((prev) => prev.filter((m) => m.id !== memoryId));
+            setSemanticMemories((prev) => prev.filter((m) => (m.memory_id || m.id) !== memoryId));
         } catch (error) {
             console.error("Error deleting semantic memory:", error);
         }
@@ -451,6 +451,18 @@ function App() {
                             if (chatId && chatId !== currentChatId) {
                                 setCurrentChatId(chatId);
                             }
+                        } else if (evt.event === "tool_call") {
+                            const toolName = evt.data?.tool_call?.name || evt.data?.tool || "tool";
+                            setMessages((prev) =>
+                                prev.map((m) =>
+                                    m.id === assistantMessageId
+                                        ? {
+                                              ...m,
+                                              content: `${m.content || ""}\n[tool:${toolName}] ${JSON.stringify(evt.data)}`,
+                                          }
+                                        : m
+                                )
+                            );
                         } else if (evt.event === "token") {
                             const token = evt.data?.text || "";
                             if (!token) continue;
@@ -715,11 +727,11 @@ function App() {
                             <div className="text-sm text-[#948979]">No semantic memories yet.</div>
                         ) : (
                             semanticMemories.map((m) => (
-                                <div key={m.id} className="rounded-xl border border-[#948979]/35 bg-[#161A30] p-3">
+                                <div key={m.memory_id || m.id} className="rounded-xl border border-[#948979]/35 bg-[#161A30] p-3">
                                     <div className="text-xs text-[#948979] flex items-center justify-between">
-                                        <span>{m.memory_type || "memory"} • {m.scope || "user"}</span>
+                                        <span>{m.memory_type || m.type || "memory"} - {m.scope || "user"}</span>
                                         <button
-                                            onClick={() => deleteSemanticMemory(m.id)}
+                                            onClick={() => deleteSemanticMemory(m.memory_id || m.id)}
                                             className="text-red-300 hover:text-red-200"
                                         >
                                             Delete

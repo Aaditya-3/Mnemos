@@ -82,11 +82,20 @@ export default function App() {
         for (const block of blocks) {
           const evt = parseSseBlock(block);
           if (!evt) continue;
-          if (evt.event === "token") {
+          if (evt.event === "tool_call") {
+            const toolName = evt.payload?.tool_call?.name || evt.payload?.tool || "tool";
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: `${m.content}\n[tool:${toolName}] ${JSON.stringify(evt.payload)}` } : m
+              )
+            );
+          } else if (evt.event === "token") {
             const token = evt.payload?.text || "";
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, content: `${m.content}${token}` } : m))
             );
+          } else if (evt.event === "error") {
+            throw new Error(evt.payload?.message || "Stream error");
           }
         }
       }
@@ -150,9 +159,9 @@ export default function App() {
           </div>
           <div className="space-y-2 max-h-[70vh] overflow-y-auto">
             {semantic.map((m) => (
-              <div key={m.id} className="rounded-lg border border-slate-700 p-2 text-sm">
+              <div key={m.memory_id || m.id} className="rounded-lg border border-slate-700 p-2 text-sm">
                 <div className="text-xs text-slate-400">
-                  {m.memory_type} • {m.scope} • {Number(m.importance_score || 0).toFixed(2)}
+                  {(m.memory_type || m.type || "memory")} - {m.scope} - {Number(m.importance_score || 0).toFixed(2)}
                 </div>
                 <div className="mt-1">{m.content}</div>
               </div>
@@ -164,4 +173,3 @@ export default function App() {
     </div>
   );
 }
-

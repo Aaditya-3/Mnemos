@@ -11,12 +11,13 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from threading import Lock
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.core.config import get_settings
 from backend.app.observability.logging import log_event
 from backend.app.observability.metrics import metrics
+from backend.app.security.replay import replay_protector
 
 
 _PROMPT_INJECTION_PATTERNS = [
@@ -24,6 +25,11 @@ _PROMPT_INJECTION_PATTERNS = [
     r"reveal\s+(system|developer)\s+prompt",
     r"bypass\s+safety",
     r"act\s+as\s+system",
+    r"show\s+me\s+your\s+hidden\s+instructions",
+    r"print\s+the\s+prompt",
+    r"jailbreak",
+    r"developer\s+mode",
+    r"BEGIN\s+SYSTEM\s+PROMPT",
 ]
 
 
@@ -50,7 +56,9 @@ class InMemoryRateLimiter:
             return True
 
 
-_limiter = InMemoryRateLimiter(max_requests_per_minute=get_settings().max_requests_per_minute)
+_settings = get_settings()
+_user_limiter = InMemoryRateLimiter(max_requests_per_minute=_settings.max_requests_per_minute)
+_ip_limiter = InMemoryRateLimiter(max_requests_per_minute=max(30, _settings.max_requests_per_minute * 2))
 
 
 def validate_message_payload(message: str):
@@ -78,9 +86,17 @@ def setup_middleware(app: FastAPI):
         request.state.start_time = start
 
         user_id = request.headers.get("X-User-ID", "anonymous").strip() or "anonymous"
-        rate_key = f"{user_id}:{request.client.host if request.client else 'local'}"
-        if not _limiter.allow(rate_key):
+        ip = request.client.host if request.client else "local"
+        user_rate_key = f"user:{user_id}"
+        ip_rate_key = f"ip:{ip}"
+        if not _user_limiter.allow(user_rate_key) or not _ip_limiter.allow(ip_rate_key):
+            log_event("rate_limit_triggered", request_id=request_id, user_id=user_id, ip=ip, path=request.url.path)
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+
+        nonce = (request.headers.get("X-Request-Nonce") or "").strip()
+        if nonce and not replay_protector.accept(user_id=user_id, nonce=nonce):
+            log_event("replay_rejected", request_id=request_id, user_id=user_id, ip=ip)
+            return JSONResponse(status_code=409, content={"detail": "Replay detected"})
 
         response = await call_next(request)
         elapsed = time.perf_counter() - start
@@ -94,8 +110,9 @@ def setup_middleware(app: FastAPI):
             "no-store, no-cache, must-revalidate, max-age=0",
         )
 
-        metrics.inc("http_requests_total", 1)
+        metrics.inc("total_requests", 1)
         metrics.observe("http_request_latency_seconds", elapsed)
+        metrics.mark_user_active(user_id)
         log_event(
             "http_request",
             request_id=request_id,

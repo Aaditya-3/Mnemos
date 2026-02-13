@@ -101,7 +101,7 @@ def get_settings() -> Settings:
         embedding_dims=_env_int("EMBEDDING_DIMS", 384),
         semantic_top_k=_env_int("SEMANTIC_TOP_K", 12),
         semantic_token_budget=_env_int("SEMANTIC_TOKEN_BUDGET", 900),
-        importance_decay_per_day=_env_float("IMPORTANCE_DECAY_PER_DAY", 0.012),
+        importance_decay_per_day=_env_float("IMPORTANCE_DECAY_PER_DAY", 0.985),
         importance_drop_threshold=_env_float("IMPORTANCE_DROP_THRESHOLD", 0.18),
         semantic_compression_age_days=_env_int("SEMANTIC_COMPRESSION_AGE_DAYS", 14),
         semantic_compression_min_cluster=_env_int("SEMANTIC_COMPRESSION_MIN_CLUSTER", 3),
@@ -109,4 +109,3 @@ def get_settings() -> Settings:
         llm_cost_output_per_1k=_env_float("LLM_COST_OUTPUT_PER_1K", 0.0),
         cors_allow_origins=cors_allow_origins,
     )
-

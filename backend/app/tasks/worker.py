@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay
+from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay, run_reembedding
 
 
 def _create_celery():
@@ -44,3 +44,6 @@ if celery_app is not None:
     def compress_user_task(user_id: str):
         return run_compression(user_id=user_id)
 
+    @celery_app.task(name="semantic.reembed_user")
+    def reembed_user_task(user_id: str, reason: str = "model_update"):
+        return run_reembedding(user_id=user_id, reason=reason)
