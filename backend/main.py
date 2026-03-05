@@ -65,6 +65,7 @@ from backend.app.services.tool_router import run_agent_turn
 from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay, run_reembedding
 from backend.app.security.jwt_rotation import issue_access_token, issue_refresh_token, rotate_tokens
 from backend.app.brain.service import get_brain_service
+from backend.app.brain.models import Intent
 
 project_root = _project_root
 settings = get_settings()
@@ -87,8 +88,192 @@ SCHEDULE_MARKERS = {
     "upcoming", "tomorrow", "today", "important", "date", "day",
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 }
+GREETING_ONLY_RE = re.compile(
+    r"^\s*(hi|hello|hey|yo|good\s+morning|good\s+afternoon|good\s+evening)\b[!.,\s]*$",
+    re.IGNORECASE,
+)
+RESET_COMMAND_RE = re.compile(
+    r"\b(start over|new chat|new conversation|clear chat|fresh chat|reset\s+(?:chat|conversation)|restart\s+(?:chat|conversation))\b",
+    re.IGNORECASE,
+)
+REFERENCE_TOKENS = {"my", "mine", "it", "that"}
+SHORT_STANDALONE_MESSAGES = {
+    "ok",
+    "okay",
+    "thanks",
+    "thank you",
+    "cool",
+    "nice",
+    "understood",
+    "got it",
+}
+MEMORY_QUERY_PATTERNS = [
+    r"\bwhat(?:'s| is)\s+my\b",
+    r"\bwhen\s+(?:is|was)\s+my\b",
+    r"\bmy\s+(?:fav(?:ou)?rite|fav)\b",
+    r"\bwhat\s+do\s+i\s+like\b",
+    r"\bdo\s+you\s+remember\b",
+    r"\bmy\s+preferences?\b",
+    r"\bmy\s+likes?\b",
+]
+NON_MEMORY_TASK_MARKERS = {
+    "code",
+    "bug",
+    "error",
+    "file",
+    "function",
+    "api",
+    "frontend",
+    "backend",
+    "compile",
+    "build",
+    "deploy",
+}
+GENERIC_GREETING_LINE_PATTERNS = [
+    r"^\s*how\s+can\s+i\s+help\s+you\s+today\??\s*",
+    r"^\s*how\s+may\s+i\s+help(?:\s+you)?\??\s*",
+    r"^\s*it(?:'s| is)\s+great\s+to\s+see\s+you[.!]?\s*",
+    r"^\s*great\s+to\s+see\s+you[.!]?\s*",
+]
 if not api_key_loaded:
     print("WARNING: GROQ_API_KEY not found. Create .env in project root and set GROQ_API_KEY=...")
+
+
+def _word_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", (text or "").lower())
+
+
+def _is_clear_greeting(message: str) -> bool:
+    return bool(GREETING_ONLY_RE.match((message or "").strip()))
+
+
+def _is_explicit_reset_request(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    if text in {"reset", "restart", "start over", "new chat", "new conversation", "clear chat"}:
+        return True
+    return bool(RESET_COMMAND_RE.search(text))
+
+
+def _is_short_message(message: str, max_words: int = 5) -> bool:
+    count = len(_word_tokens(message))
+    return 0 < count <= max_words
+
+
+def _contains_reference_pronouns(message: str) -> bool:
+    tokens = set(_word_tokens(message))
+    return bool(tokens.intersection(REFERENCE_TOKENS))
+
+
+def _is_standalone_short_message(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    if _is_clear_greeting(text):
+        return True
+    if text in SHORT_STANDALONE_MESSAGES:
+        return True
+    if text.startswith("thanks ") or text.startswith("thank you "):
+        return True
+    return False
+
+
+def _is_context_dependent_message(message: str) -> bool:
+    text = (message or "").strip()
+    if not text or _is_standalone_short_message(text):
+        return False
+    if _is_short_message(text):
+        return True
+    if _contains_reference_pronouns(text):
+        return True
+    return False
+
+
+def _is_memory_lookup_request(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    if _is_clear_greeting(text) or _is_explicit_reset_request(text):
+        return False
+
+    subject_key, _, _ = parse_preference_query(text)
+    if subject_key:
+        return True
+
+    tokens = set(_word_tokens(text))
+    memory_markers = {
+        "remember",
+        "favorite",
+        "favourite",
+        "fav",
+        "preference",
+        "preferences",
+        "like",
+        "likes",
+        "dislike",
+    }
+    if tokens.intersection(memory_markers):
+        return True
+    if any(re.search(p, text) for p in MEMORY_QUERY_PATTERNS):
+        return True
+    if "my" in tokens and ("?" in text or len(tokens) <= 8):
+        if tokens.intersection(NON_MEMORY_TASK_MARKERS):
+            return False
+        return True
+    if _contains_reference_pronouns(text) and _is_short_message(text):
+        return True
+    return False
+
+
+def _should_force_memory_unavailable_reply(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    if parse_preference_query(text)[0]:
+        return True
+    strong_patterns = [
+        r"\bwhat(?:'s| is)\s+my\b",
+        r"\bwhen\s+(?:is|was)\s+my\b",
+        r"\bwhat\s+do\s+i\s+like\b",
+        r"\bdo\s+you\s+remember\b",
+    ]
+    if any(re.search(p, text) for p in strong_patterns):
+        return True
+    return _contains_reference_pronouns(text) and _is_short_message(text)
+
+
+def _recent_user_turns(chat_session: "ChatSession", max_turns: int = 2) -> list[str]:
+    if chat_session is None:
+        return []
+    rows: list[str] = []
+    for msg in reversed(chat_session.messages):
+        if str(msg.get("role", "")).lower() != "user":
+            continue
+        content = str(msg.get("content", "")).strip()
+        if not content:
+            continue
+        rows.append(content)
+        if len(rows) >= max_turns:
+            break
+    rows.reverse()
+    return rows
+
+
+def _resolution_query_with_recent_context(message: str, chat_session: "ChatSession") -> str:
+    base = (message or "").strip()
+    if not base:
+        return base
+    if not _is_context_dependent_message(base):
+        return base
+    recent = _recent_user_turns(chat_session, max_turns=2)
+    if not recent:
+        return base
+    merged = " | ".join(recent)
+    merged = re.sub(r"\s+", " ", merged).strip()
+    if not merged:
+        return base
+    return f"{base} [recent_context: {merged[:220]}]"
 
 
 def sanitize_response(user_message: str, reply: str) -> str:
@@ -101,10 +286,10 @@ def sanitize_response(user_message: str, reply: str) -> str:
 
     text = reply.strip()
 
-    # If the user didn't ask a question and is just stating facts,
-    # aggressively strip leading greetings and small talk.
-    user_is_question = "?" in user_message
-    if not user_is_question:
+    user_greeted = _is_clear_greeting(user_message)
+
+    # If the user did not greet, strip conversational lead-ins.
+    if not user_greeted:
         lower = text.lower()
         greeting_prefixes = [
             "hi,", "hi ", "hello,", "hello ",
@@ -116,6 +301,8 @@ def sanitize_response(user_message: str, reply: str) -> str:
                 # Remove the prefix from the original text, not just lower
                 text = text[len(prefix):].lstrip()
                 lower = text.lower()
+        for pattern in GENERIC_GREETING_LINE_PATTERNS:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
 
     # Remove common meta-reasoning lead-ins that expose internal logic.
     meta_prefix_patterns = [
@@ -128,7 +315,11 @@ def sanitize_response(user_message: str, reply: str) -> str:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
     text = text.strip()
     if not text:
-        text = original.strip()
+        fallback = original.strip()
+        if not user_greeted and any(re.search(p, fallback, flags=re.IGNORECASE) for p in GENERIC_GREETING_LINE_PATTERNS):
+            text = "I don't have that information yet."
+        else:
+            text = fallback
 
     return text
 
@@ -269,14 +460,25 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 def _parse_iso_datetime(raw: Any) -> datetime:
     if isinstance(raw, datetime):
-        return raw
+        return _ensure_utc_datetime(raw)
     text = str(raw or "").strip()
     if not text:
         return datetime.now(timezone.utc)
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return _ensure_utc_datetime(datetime.fromisoformat(text.replace("Z", "+00:00")))
     except Exception:
         return datetime.now(timezone.utc)
+
+
+def _ensure_utc_datetime(raw: Any) -> datetime:
+    """
+    Normalize datetimes to timezone-aware UTC to avoid naive/aware comparison errors.
+    """
+    if not isinstance(raw, datetime):
+        return datetime.now(timezone.utc)
+    if raw.tzinfo is None or raw.tzinfo.utcoffset(raw) is None:
+        return raw.replace(tzinfo=timezone.utc)
+    return raw.astimezone(timezone.utc)
 
 
 class ChatSession:
@@ -390,6 +592,8 @@ def _chat_token_count(session: ChatSession) -> int:
 
 
 def _persist_chat_session(session: ChatSession):
+    session.created_at = _ensure_utc_datetime(session.created_at)
+    session.updated_at = _ensure_utc_datetime(session.updated_at)
     with get_relational_session() as db:
         _ensure_user_row(session.user_id, db=db)
         row = db.query(DBChatSession).filter(DBChatSession.id == session.id).first()
@@ -453,8 +657,8 @@ def _load_chat_sessions_from_relational() -> int:
         session = ChatSession(user_id=row.user_id)
         session.id = row.id
         session.title = row.title or "New Chat"
-        session.created_at = row.created_at or datetime.now(timezone.utc)
-        session.updated_at = row.updated_at or session.created_at
+        session.created_at = _ensure_utc_datetime(row.created_at or datetime.now(timezone.utc))
+        session.updated_at = _ensure_utc_datetime(row.updated_at or session.created_at)
         session.messages = grouped_messages.get(row.id, [])
         chat_sessions[session.id] = session
 
@@ -792,7 +996,8 @@ def _augment_query_for_continuity(user_message: str, chat_session: ChatSession) 
         ("fav" in msg_l or "favorite" in msg_l or "favourite" in msg_l)
         and ("char" in msg_l or "character" in msg_l)
     )
-    if not has_implicit_marker and not asks_fav_without_entity:
+    context_dependent = _is_context_dependent_message(msg)
+    if not has_implicit_marker and not asks_fav_without_entity and not context_dependent:
         return msg
 
     entity = _latest_entity_from_chat_history(chat_session)
@@ -944,7 +1149,7 @@ def enforce_user_chat_token_budget(user_id: str):
         return
 
     # Oldest chats are removed first.
-    user_sessions.sort(key=lambda s: s.created_at)
+    user_sessions.sort(key=lambda s: _ensure_utc_datetime(s.created_at))
     total_tokens = sum(_chat_token_count(s) for s in user_sessions)
 
     while len(user_sessions) > 1 and total_tokens > MAX_USER_CHAT_TOKENS:
@@ -999,8 +1204,8 @@ def _load_chat_session_from_relational(chat_id: str) -> ChatSession | None:
     session = ChatSession(user_id=row.user_id)
     session.id = row.id
     session.title = row.title or "New Chat"
-    session.created_at = row.created_at or datetime.now(timezone.utc)
-    session.updated_at = row.updated_at or session.created_at
+    session.created_at = _ensure_utc_datetime(row.created_at or datetime.now(timezone.utc))
+    session.updated_at = _ensure_utc_datetime(row.updated_at or session.created_at)
     session.messages = [
         {
             "role": m.role,
@@ -1010,6 +1215,32 @@ def _load_chat_session_from_relational(chat_id: str) -> ChatSession | None:
         for m in messages
         if m.role in {"user", "assistant"} and str(m.content or "").strip()
     ]
+    return session
+
+
+def _latest_user_chat_session(user_id: str) -> ChatSession | None:
+    uid = (user_id or "").strip()
+    if not uid:
+        return None
+
+    in_memory = [s for s in chat_sessions.values() if s.user_id == uid]
+    if in_memory:
+        in_memory.sort(key=lambda s: _ensure_utc_datetime(s.updated_at), reverse=True)
+        return in_memory[0]
+
+    with get_relational_session() as db:
+        row = (
+            db.query(DBChatSession)
+            .filter(DBChatSession.user_id == uid)
+            .order_by(DBChatSession.updated_at.desc())
+            .first()
+        )
+    if row is None:
+        return None
+
+    session = _load_chat_session_from_relational(row.id)
+    if session is not None:
+        chat_sessions[session.id] = session
     return session
 
 
@@ -1297,6 +1528,157 @@ def handle_preference_query(user_message: str, user_id: str) -> Optional[str]:
     return None
 
 
+def _top_unique_memory_values(memories: list[Any], limit: int = 3) -> list[str]:
+    out: list[str] = []
+    seen = set()
+    for memory in memories:
+        value = re.sub(r"\s+", " ", str(memory.value or "").strip())
+        if not value:
+            continue
+        marker = value.lower()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(value)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Optional[str]:
+    query = (user_message or "").strip()
+    if not query:
+        return None
+
+    # Strongest deterministic path: explicit preference resolver.
+    preference_reply = handle_preference_query(query, user_id)
+    if preference_reply:
+        return preference_reply
+
+    store = get_memory_store()
+    memories = [
+        m
+        for m in store.get_memories_by_confidence(user_id=user_id, min_confidence=0.5)
+        if str(m.value or "").strip()
+    ]
+    if not memories:
+        return None
+
+    msg_l = query.lower()
+    tokens = set(_word_tokens(msg_l))
+
+    query_specs = [
+        (
+            {"core_identity.name"},
+            {"name", "called", "identity"},
+            "Your name is {value}.",
+            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
+        ),
+        (
+            {"core_identity.college"},
+            {"college", "university", "school"},
+            "Your college is {value}.",
+            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
+        ),
+        (
+            {"core_identity.year"},
+            {"year", "graduation", "batch"},
+            "Your year is {value}.",
+            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
+        ),
+        (
+            {"lifestyle.food"},
+            {"food", "eat", "meal"},
+            "Your preferred food is {value}.",
+            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
+        ),
+        (
+            {"lifestyle.drinks"},
+            {"drink", "drinks", "beverage", "soda"},
+            "Your preferred drink is {value}.",
+            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
+        ),
+        (
+            {"lifestyle.gym"},
+            {"gym", "workout", "fitness"},
+            "You said this about your fitness preference: {value}.",
+            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
+        ),
+    ]
+
+    for keys, markers, single_template, multi_template in query_specs:
+        if not markers.intersection(tokens):
+            continue
+        matched = [m for m in memories if str(m.key or "").lower() in keys]
+        matched.sort(key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)
+        values = _top_unique_memory_values(matched, limit=3)
+        if not values:
+            continue
+        if len(values) == 1:
+            return single_template.format(value=values[0])
+        return multi_template.format(top=values[0], others=", ".join(values[1:]))
+
+    wants_preference_summary = bool(
+        re.search(r"\bwhat\s+do\s+i\s+like\b", msg_l)
+        or re.search(r"\bmy\s+preferences?\b", msg_l)
+        or re.search(r"\bmy\s+likes?\b", msg_l)
+    )
+    if wants_preference_summary:
+        pref_memories = [m for m in memories if str(m.type or "") == "preference"]
+        pref_memories.sort(key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)
+        values = _top_unique_memory_values(pref_memories, limit=3)
+        if values:
+            if len(values) == 1:
+                return f"From your stored preferences, I have: {values[0]}."
+            return f"From your stored preferences, I have: {values[0]}; {values[1]}. I also have: {values[2]}." if len(values) >= 3 else f"From your stored preferences, I have: {values[0]} and {values[1]}."
+    return None
+
+
+def _resolve_semantic_memory_reply(user_id: str, query: str) -> Optional[str]:
+    text = (query or "").strip()
+    if not text:
+        return None
+    service = get_semantic_memory_service()
+    try:
+        rows, _ = service.retrieve_context(
+            user_id=user_id,
+            query=text,
+            top_k=min(4, settings.semantic_top_k),
+            scopes=["user", "conversation", "project", "global"],
+        )
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    strong = [
+        r
+        for r in rows
+        if float(r.get("similarity_score", 0.0)) >= 0.62 and float(r.get("final_score", 0.0)) >= 0.45
+    ]
+    if not strong:
+        return None
+
+    snippets: list[str] = []
+    seen = set()
+    for row in strong:
+        content = re.sub(r"\s+", " ", str(row.get("content") or "").strip())
+        if not content:
+            continue
+        marker = content.lower()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        snippets.append(content[:220])
+        if len(snippets) >= 2:
+            break
+    if not snippets:
+        return None
+    if len(snippets) == 1:
+        return f"From your earlier messages: {snippets[0]}"
+    return f"From your earlier messages: {snippets[0]} Also: {snippets[1]}"
+
+
 def handle_builtin_realtime_query(user_message: str) -> Optional[str]:
     """
     Deterministic realtime answers for simple date/time queries.
@@ -1368,7 +1750,8 @@ async def chat(
         if adjusted_count:
             print(f"Applied strong sentiment feedback to {adjusted_count} memory item(s)")
 
-        chat_id = request.chat_id
+        reset_requested = _is_explicit_reset_request(user_message)
+        chat_id = None if reset_requested else request.chat_id
         chat_session = None
         if chat_id:
             chat_session = chat_sessions.get(chat_id)
@@ -1376,6 +1759,11 @@ async def chat(
                 chat_session = _load_chat_session_from_relational(chat_id)
                 if chat_session is not None:
                     chat_sessions[chat_session.id] = chat_session
+
+        if chat_session is None and not chat_id and not reset_requested:
+            chat_session = _latest_user_chat_session(user_id)
+            if chat_session is not None:
+                chat_id = chat_session.id
 
         if chat_session is None:
             chat_session = ChatSession(user_id=user_id)
@@ -1393,44 +1781,77 @@ async def chat(
         resolved_user_message = _resolve_short_reply_context(user_message, chat_session)
         continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
         is_ack_reply = _is_short_acknowledgement(user_message)
+        context_dependent = _is_context_dependent_message(user_message)
+        memory_lookup = _is_memory_lookup_request(continuity_message)
+        memory_resolution_query = _resolution_query_with_recent_context(continuity_message, chat_session)
+        model_continuity_message = memory_resolution_query if context_dependent else continuity_message
         brain_decision = brain_service.process(
             user_id=user_id,
             message=continuity_message,
             chat_session=chat_session,
         )
 
+        direct_reply: Optional[str] = None
+        direct_path = ""
+        if not is_ack_reply and brain_decision.intent != Intent.MEMORY_UPDATE and memory_lookup:
+            deterministic_direct = _resolve_deterministic_memory_reply(user_id=user_id, user_message=memory_resolution_query)
+            if deterministic_direct:
+                direct_reply = deterministic_direct
+                direct_path = "deterministic_memory"
+
+        if direct_reply is None and brain_decision.direct_response:
+            direct_reply = brain_decision.direct_response
+            direct_path = "structured_memory"
+
+        if direct_reply is None and not is_ack_reply and brain_decision.intent != Intent.MEMORY_UPDATE and memory_lookup:
+            semantic_direct = _resolve_semantic_memory_reply(user_id=user_id, query=memory_resolution_query)
+            if semantic_direct:
+                direct_reply = semantic_direct
+                direct_path = "semantic_memory"
+            elif _should_force_memory_unavailable_reply(continuity_message):
+                direct_reply = "I don't have that information yet."
+                direct_path = "memory_unavailable"
+
         # --------------------------------------------------------------
         # A. Handle explicit category-profile queries (top 3)
         # --------------------------------------------------------------
-        category_query = None if (is_ack_reply or brain_decision.direct_response) else detect_category_query(continuity_message)
+        skip_hint_path = bool(is_ack_reply or direct_reply)
+        category_query = None if skip_hint_path else detect_category_query(continuity_message)
         category_hint = build_category_top3_reply(user_id, category_query) if category_query else None
 
         # --------------------------------------------------------------
         # A2. Deterministic realtime answer for date/time style queries
         # --------------------------------------------------------------
-        builtin_realtime_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_builtin_realtime_query(continuity_message)
+        builtin_realtime_hint = None if skip_hint_path else handle_builtin_realtime_query(continuity_message)
 
         # --------------------------------------------------------------
         # A2b. Deterministic schedule answer (tests/classes + day)
         # --------------------------------------------------------------
-        schedule_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_schedule_query(continuity_message, user_id)
+        schedule_hint = None if skip_hint_path else handle_schedule_query(continuity_message, user_id)
 
         # --------------------------------------------------------------
         # A3. Deterministic preference reasoning (domain-agnostic)
         # --------------------------------------------------------------
-        preference_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_preference_query(continuity_message, user_id)
+        preference_hint = None if skip_hint_path else handle_preference_query(memory_resolution_query, user_id)
+
+        policy_hints = []
+        if context_dependent:
+            policy_hints.append("CONTEXT_POLICY: treat short/reference messages as follow-ups unless user explicitly resets.")
+        if not _is_clear_greeting(user_message):
+            policy_hints.append("GREETING_POLICY: do not greet unless user clearly greets first.")
 
         deterministic_hints = [
             h
             for h in (
                 list(brain_decision.deterministic_hints)
+                + policy_hints
                 + [category_hint, builtin_realtime_hint, schedule_hint, preference_hint]
             )
             if h
         ]
 
-        if brain_decision.direct_response:
-            reply = sanitize_response(continuity_message, brain_decision.direct_response)
+        if direct_reply is not None:
+            reply = sanitize_response(continuity_message, direct_reply)
             input_tokens = estimate_tokens(continuity_message)
             output_tokens = estimate_tokens(reply)
             usage = {
@@ -1438,7 +1859,7 @@ async def chat(
                 "output_tokens_est": output_tokens,
                 "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
                 "llm_latency_ms": 0.0,
-                "path": "brain_direct",
+                "path": f"direct_{direct_path or 'brain'}",
                 "intent": brain_decision.intent.value,
             }
             semantic_rows = []
@@ -1452,7 +1873,7 @@ async def chat(
                 user_id=user_id,
                 chat_id=chat_id,
                 user_message=user_message,
-                continuity_message=continuity_message,
+                continuity_message=model_continuity_message,
                 use_tools=bool(request.use_tools and settings.enable_tools),
                 scope=request.scope,
                 response_style=brain_decision.response_style,

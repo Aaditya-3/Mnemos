@@ -1,303 +1,336 @@
 """
 Memory Retriever
 
-Retrieves relevant memories for the current conversation context.
+Topic-aware semantic retrieval pipeline for deterministic memory injection.
 """
 
-import heapq
+from __future__ import annotations
+
+import math
 import os
 import re
+from datetime import datetime, timezone
+from typing import Any
+
+from backend.app.embeddings.provider import cosine_similarity, get_embedding_provider
+from backend.app.observability.logging import log_event
 from .memory_store import get_memory_store
 
-ESSENTIAL_KEYS = {
-    "core_identity.name",
-    "core_identity.college",
-    "core_identity.year",
-    "lifestyle.food",
-    "lifestyle.gym",
-    "lifestyle.drinks",
-    "entertainment.anime",
-    "entertainment.character_preference",
-    "entertainment.global_character_rule",
-    "technical_stack.cpp",
-    "technical_stack.mongodb",
-    "technical_stack.groq",
-}
 
-CRITICAL_MARKERS = {
-    "important",
-    "critical",
-    "remember",
-    "forget",
-    "must",
-    "never",
-    "always",
-    "rule",
-    "rules",
-    "instruction",
-    "instructions",
-    "constraint",
-}
+TOP_K = int(os.getenv("MEMORY_RETRIEVER_TOP_K", "5"))
+SIMILARITY_THRESHOLD = float(os.getenv("MEMORY_RETRIEVER_SIMILARITY_THRESHOLD", "0.75"))
+RAW_SIMILARITY_FLOOR = float(os.getenv("MEMORY_RETRIEVER_RAW_SIMILARITY_FLOOR", "0.05"))
+MAX_INJECT = int(os.getenv("MEMORY_RETRIEVER_MAX_INJECT", "3"))
 
-MAX_CANDIDATES = int(os.getenv("MEMORY_RETRIEVER_MAX_CANDIDATES", "80"))
-MAX_SELECTED = int(os.getenv("MEMORY_RETRIEVER_MAX_SELECTED", "12"))
-GENERIC_QUERY_STOPWORDS = {
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "to", "of", "in", "on", "for", "and", "or", "but", "with", "about",
-    "what", "which", "who", "when", "where", "why", "how",
-    "do", "does", "did", "can", "could", "would", "should",
-    "my", "me", "i", "your", "you", "it", "that", "this", "there",
-    "please", "tell", "show", "list", "give", "have",
+SIMILARITY_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_SIMILARITY", "0.7"))
+RECENCY_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_RECENCY", "0.2"))
+IMPORTANCE_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_IMPORTANCE", "0.1"))
+
+_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "favorite_anime": ("anime", "show", "series", "character", "mc", "manga"),
+    "drink_preference": ("drink", "drinks", "beverage", "soda", "cola", "juice"),
+    "food_preference": ("food", "eat", "meal", "cuisine", "dish"),
+    "hobby": ("hobby", "hobbies", "sport", "sports", "gym", "music", "game"),
+    "relationship": ("relationship", "partner", "girlfriend", "boyfriend", "wife", "husband"),
+    "work": ("work", "job", "office", "project", "company", "tech", "stack", "backend", "frontend"),
+    "personal_fact": ("name", "age", "college", "university", "city", "where am i from"),
 }
 
 
-def _is_critical_memory(memory) -> bool:
-    md = memory.metadata or {}
-    key_l = (memory.key or "").lower()
-    domain = str(md.get("domain", "")).lower()
-    return (
-        domain == "critical_context"
-        or key_l.startswith("custom.critical.")
+def _word_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9']+", (text or "").lower()))
+
+
+def _is_memory_intent(query: str) -> bool:
+    text = (query or "").lower()
+    tokens = _word_tokens(text)
+    markers = {
+        "my",
+        "mine",
+        "favorite",
+        "favourite",
+        "fav",
+        "prefer",
+        "preference",
+        "preferences",
+        "like",
+        "likes",
+        "remember",
+        "recall",
+    }
+    if bool(tokens.intersection(markers)):
+        return True
+    patterns = [
+        r"\bwhat(?:'s| is)\s+my\b",
+        r"\bwhat\s+do\s+i\s+like\b",
+        r"\bdo\s+you\s+remember\b",
+        r"\bwhen\s+(?:is|was)\s+my\b",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
+def _memory_text(memory: Any) -> str:
+    key = re.sub(r"\s+", " ", str(getattr(memory, "key", "") or "").strip())
+    value = re.sub(r"\s+", " ", str(getattr(memory, "value", "") or "").strip())
+    if key and value:
+        return f"{key}: {value}"
+    return value or key
+
+
+def _infer_memory_type(memory: Any) -> str:
+    current = str(getattr(memory, "memory_type", "") or "").strip().lower()
+    if current:
+        return current
+
+    key_l = str(getattr(memory, "key", "") or "").lower()
+    value_l = str(getattr(memory, "value", "") or "").lower()
+    mem_type = str(getattr(memory, "type", "") or "").lower()
+    joined = " ".join([key_l, value_l])
+
+    if key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
+        return "favorite_anime"
+    if key_l == "lifestyle.drinks" or any(t in joined for t in ("drink", "beverage", "cola", "soda")):
+        return "drink_preference"
+    if key_l == "lifestyle.food" or any(t in joined for t in ("food", "eat", "meal", "dish")):
+        return "food_preference"
+    if key_l.startswith("technical_stack.") or any(t in joined for t in ("work", "job", "project", "company")):
+        return "work"
+    if any(t in joined for t in ("girlfriend", "boyfriend", "wife", "husband", "relationship")):
+        return "relationship"
+    if "gym" in joined or "hobby" in joined or mem_type == "preference":
+        return "hobby"
+    return "personal_fact"
+
+
+def _detect_query_topic(query: str) -> str:
+    text = (query or "").lower()
+    if not text:
+        return ""
+
+    # Prioritize stronger topic identifiers first.
+    priority = (
+        "favorite_anime",
+        "drink_preference",
+        "food_preference",
+        "relationship",
+        "work",
+        "hobby",
+        "personal_fact",
     )
+    for topic in priority:
+        keywords = _TOPIC_KEYWORDS.get(topic, ())
+        if any(k in text for k in keywords):
+            return topic
+    return ""
 
 
-def _semantic_tokens(tokens: set[str]) -> set[str]:
-    return {t for t in tokens if len(t) > 2 and t not in GENERIC_QUERY_STOPWORDS}
+def _topic_match(memory: Any, topic: str) -> bool:
+    if not topic:
+        return True
+
+    memory_type = _infer_memory_type(memory)
+    if memory_type == topic:
+        return True
+
+    # Fallback lexical guard for legacy memories with weak typing.
+    text = _memory_text(memory).lower()
+    keywords = _TOPIC_KEYWORDS.get(topic, ())
+    return any(k in text for k in keywords)
 
 
-def _memory_tokens(memory) -> set[str]:
-    md = memory.metadata or {}
-    raw = " ".join(
-        [
-            str(memory.key or ""),
-            str(memory.value or ""),
-            str(md.get("domain", "") or ""),
-            str(md.get("category", "") or ""),
-            str(md.get("subject", "") or ""),
-        ]
-    ).lower()
-    return set(re.findall(r"[a-z0-9]+", raw))
+def _importance_score(memory: Any) -> float:
+    raw = getattr(memory, "importance_score", None)
+    try:
+        score = float(raw)
+        return max(0.0, min(1.0, score))
+    except Exception:
+        pass
+    try:
+        conf = float(getattr(memory, "confidence", 0.5) or 0.5)
+    except Exception:
+        conf = 0.5
+    return max(0.0, min(1.0, conf))
 
 
-def _is_broad_rule(memory) -> bool:
-    md = memory.metadata or {}
-    scope = str(md.get("scope", "")).upper()
-    rule_type = str(md.get("rule_type", "")).lower()
-    key_l = (memory.key or "").lower()
-    return (
-        (scope == "GLOBAL_SCOPE" and rule_type in {"universal", "generic"})
-        or key_l == "entertainment.global_character_rule"
-        or key_l.startswith("custom.preference_rule.")
-    )
+def _recency_score(memory: Any) -> float:
+    now = datetime.now(timezone.utc)
+    raw_dt = getattr(memory, "last_updated", None) or getattr(memory, "created_at", None)
+    if not isinstance(raw_dt, datetime):
+        return 0.5
+    dt = raw_dt if raw_dt.tzinfo else raw_dt.replace(tzinfo=timezone.utc)
+    age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
+    return math.exp(-0.03 * age_days)
+
+
+def _serialize_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "memory_id": hit["memory_id"],
+        "memory_text": hit["memory_text"],
+        "memory_type": hit["memory_type"],
+        "similarity": round(float(hit["similarity"]), 6),
+        "similarity_normalized": round(float(hit["similarity_normalized"]), 6),
+        "recency": round(float(hit["recency"]), 6),
+        "importance": round(float(hit["importance"]), 6),
+        "rank_score": round(float(hit["rank_score"]), 6),
+    }
 
 
 def retrieve_memories(user_message: str, user_id: str) -> str:
     """
-    Retrieve relevant memories for the current user message.
-    
-    Returns a short summary string suitable for system prompt.
-    Uses scoped memories with confidence >= 0.5 for balanced recall.
+    Retrieval pipeline:
+    query -> topic detection -> type filter -> vector search -> similarity threshold
+    -> weighted rank -> top-3 injection.
     """
+    query = (user_message or "").strip()
+    if not query:
+        return ""
+
     store = get_memory_store()
-    # Use the configured medium-confidence threshold.
     memories = store.get_memories_by_confidence(user_id=user_id, min_confidence=0.5)
-    
     if not memories:
-        return ""
-    
-    msg_l = (user_message or "").lower()
-    msg_tokens = set(re.findall(r"[a-z0-9]+", msg_l))
-    semantic_tokens = _semantic_tokens(msg_tokens)
-    entity = _extract_query_entity(msg_l)
-    query_domain, query_category = _infer_query_context(msg_tokens)
-    query_is_critical = bool(CRITICAL_MARKERS.intersection(msg_tokens))
-
-    # Keep candidate set bounded for predictable latency.
-    scoped = []
-    for m in memories:
-        md = m.metadata or {}
-        domain = str(md.get("domain", "")).lower()
-        category = str(md.get("category", "")).lower()
-        scope = str(md.get("scope", "")).upper()
-        subject = str(md.get("subject", "")).lower().strip()
-
-        is_critical = _is_critical_memory(m)
-
-        # Must have explicit scope metadata to be used.
-        if not domain or not category or not scope:
-            continue
-        if query_domain and domain != query_domain and not is_critical:
-            continue
-        if query_category and query_category not in category and not is_critical:
-            continue
-        if entity and scope == "LOCAL_SCOPE" and subject and subject != entity and not is_critical:
-            continue
-
-        if not query_domain and semantic_tokens and not is_critical:
-            mem_tokens = _memory_tokens(m)
-            overlap_semantic = len(semantic_tokens.intersection(mem_tokens))
-            if overlap_semantic == 0:
-                continue
-            # Global broad rules must be strongly tied to current query terms.
-            if _is_broad_rule(m) and overlap_semantic < 2:
-                continue
-
-        scoped.append(m)
-
-    if not scoped:
+        log_event(
+            "memory_retrieval_debug",
+            user_id=user_id,
+            user_query=query,
+            query_topic="",
+            query_embedding=[],
+            retrieved_memories=[],
+            filtered_memories=[],
+            final_injected_memories=[],
+        )
         return ""
 
-    # Keep top candidates without sorting the full set for better performance as memory grows.
-    candidate_count = min(MAX_CANDIDATES, max(24, len(scoped) // 2))
-    candidates = heapq.nlargest(
-        candidate_count,
-        scoped,
-        key=lambda m: (m.confidence, m.last_updated.timestamp()),
-    )
+    topic = _detect_query_topic(query)
+    memory_intent = _is_memory_intent(query)
+    type_filtered = [m for m in memories if _topic_match(m, topic)]
+    if topic and not type_filtered:
+        # Known topic but no matching typed memory means "no relevant memory found".
+        type_filtered = []
+    elif not topic:
+        type_filtered = list(memories)
 
-    def score(memory):
-        key_tokens = set(re.findall(r"[a-z0-9]+", memory.key.lower()))
-        value_tokens = set(re.findall(r"[a-z0-9]+", memory.value.lower()))
-        overlap = len(msg_tokens.intersection(key_tokens.union(value_tokens)))
-        identity_bonus = 1 if memory.key.lower() == "core_identity.name" else 0
-        food_bonus = 0
-        if {"food", "favourite", "favorite"}.intersection(msg_tokens):
-            if memory.key.lower() == "lifestyle.food":
-                food_bonus = 3
-            elif memory.key.lower().startswith("entertainment."):
-                food_bonus = -1
-        character_bonus = 0
-        if {"character", "char", "mc", "main", "anime"}.intersection(msg_tokens):
-            if memory.key.lower() in {"entertainment.character_preference", "entertainment.global_character_rule"}:
-                character_bonus = 3
-        schedule_bonus = 0
-        if {"today", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "schedule", "important", "when"}.intersection(msg_tokens):
-            if memory.key.lower().startswith("lifestyle.upcoming_event."):
-                schedule_bonus = 4
+    if not type_filtered:
+        embedder = get_embedding_provider()
+        query_embedding = embedder.embed(query).vector
+        log_event(
+            "memory_retrieval_debug",
+            user_id=user_id,
+            user_query=query,
+            query_topic=topic,
+            query_embedding=[round(float(x), 6) for x in query_embedding],
+            retrieved_memories=[],
+            filtered_memories=[],
+            final_injected_memories=[],
+        )
+        return ""
 
-        entity_bonus = 0
-        entity_penalty = 0
-        if entity:
-            key_l = memory.key.lower()
-            md = memory.metadata or {}
-            subject = str(md.get("subject", "")).lower().strip()
-            if subject and subject == entity:
-                entity_bonus = 8
-            if key_l.endswith(f".{entity}") or f"_{entity}" in key_l:
-                entity_bonus = max(entity_bonus, 7)
-            # If query names an entity, suppress exceptions for other entities.
-            if "character_exception." in key_l and not key_l.endswith(f".{entity}"):
-                entity_penalty = 9
+    embedder = get_embedding_provider()
+    query_vector = list(embedder.embed(query).vector or [])
+    vector_dims = len(query_vector)
 
-        rule_bonus = 0
-        md = memory.metadata or {}
-        rule_type = str(md.get("rule_type", "")).lower()
-        if {"anime", "character", "char", "fav", "favorite"}.intersection(msg_tokens):
-            if rule_type == "exception":
-                rule_bonus = 4
-            elif rule_type == "universal":
-                rule_bonus = 2
-            elif rule_type == "specific":
-                rule_bonus = 3
-        critical_bonus = 0
-        if _is_critical_memory(memory):
-            critical_bonus = 6 if query_is_critical else 2
-        constraint_bonus = 2 if query_is_critical and memory.type == "constraint" else 0
+    retrieved_hits: list[dict[str, Any]] = []
+    dirty = False
 
-        return (
-            overlap + identity_bonus + food_bonus + character_bonus + schedule_bonus + entity_bonus + rule_bonus + critical_bonus + constraint_bonus - entity_penalty,
-            memory.confidence,
-            memory.last_updated.timestamp(),
+    for memory in type_filtered:
+        memory_type = _infer_memory_type(memory)
+        if str(getattr(memory, "memory_type", "") or "").strip().lower() != memory_type:
+            memory.memory_type = memory_type
+            dirty = True
+
+        memory_text = _memory_text(memory)
+        if not memory_text:
+            continue
+
+        embedding = list(getattr(memory, "embedding", []) or [])
+        if not embedding or (vector_dims and len(embedding) != vector_dims):
+            try:
+                embedding = list(embedder.embed(memory_text).vector or [])
+                memory.embedding = embedding
+                dirty = True
+            except Exception:
+                continue
+        if not embedding:
+            continue
+
+        similarity = cosine_similarity(query_vector, embedding)
+        similarity = max(0.0, min(1.0, float(similarity)))
+        recency = _recency_score(memory)
+        importance = _importance_score(memory)
+        rank_score = (
+            (similarity * SIMILARITY_WEIGHT)
+            + (recency * RECENCY_WEIGHT)
+            + (importance * IMPORTANCE_WEIGHT)
         )
 
-    memories_sorted = sorted(candidates, key=score, reverse=True)
-    selected = []
-    seen_ids = set()
-    for m in memories_sorted:
-        if len(selected) >= MAX_SELECTED:
-            break
-        if m.id in seen_ids:
-            continue
-        selected.append(m)
-        seen_ids.add(m.id)
+        retrieved_hits.append(
+            {
+                "memory_id": str(getattr(memory, "id", "")),
+                "memory_text": memory_text,
+                "memory_type": memory_type,
+                "similarity": similarity,
+                "similarity_normalized": similarity,
+                "recency": recency,
+                "importance": importance,
+                "rank_score": rank_score,
+            }
+        )
 
-    # Ensure critical memories are not lost even if lexical overlap is weak.
-    critical_candidates = heapq.nlargest(
-        3,
-        [m for m in candidates if _is_critical_memory(m)],
-        key=lambda m: (m.confidence, m.last_updated.timestamp()),
-    )
-    required_critical = 2 if query_is_critical else 1
-    for cm in critical_candidates:
-        if required_critical <= 0:
-            break
-        if cm.id in seen_ids:
-            continue
-        if len(selected) < MAX_SELECTED:
-            selected.append(cm)
-        else:
-            selected[-1] = cm
-        seen_ids.add(cm.id)
-        required_critical -= 1
+    if dirty:
+        try:
+            store.save()
+        except Exception:
+            pass
 
-    # Build concise summary string
-    parts = []
-    for memory in selected:
-        md = memory.metadata or {}
-        rule_type = md.get("rule_type")
-        scope = md.get("scope")
-        subject = md.get("subject")
-        importance = md.get("importance")
-        if importance == "critical":
-            parts.append(
-                f"- {memory.key}: {memory.value} [importance=critical; scope={scope}; subject={subject}]"
+    retrieved_hits.sort(key=lambda x: x["similarity"], reverse=True)
+    top_hits = retrieved_hits[: max(1, TOP_K)]
+
+    if top_hits:
+        min_sim = min(h["similarity"] for h in top_hits)
+        max_sim = max(h["similarity"] for h in top_hits)
+        span = max(1e-9, max_sim - min_sim)
+        for hit in top_hits:
+            if max_sim - min_sim <= 1e-9:
+                hit["similarity_normalized"] = 1.0
+            else:
+                hit["similarity_normalized"] = (hit["similarity"] - min_sim) / span
+            hit["rank_score"] = (
+                (hit["similarity_normalized"] * SIMILARITY_WEIGHT)
+                + (hit["recency"] * RECENCY_WEIGHT)
+                + (hit["importance"] * IMPORTANCE_WEIGHT)
             )
-        elif rule_type:
-            parts.append(
-                f"- {memory.key}: {memory.value} [rule_type={rule_type}; scope={scope}; subject={subject}]"
-            )
-        else:
-            parts.append(f"- {memory.key}: {memory.value}")
-    
-    context = "\n".join(parts)
-    return context
 
+    effective_threshold = SIMILARITY_THRESHOLD
+    effective_raw_floor = RAW_SIMILARITY_FLOOR
+    if not topic and not memory_intent:
+        effective_threshold = max(0.9, SIMILARITY_THRESHOLD)
+        effective_raw_floor = max(0.12, RAW_SIMILARITY_FLOOR)
 
-def _extract_query_entity(message_l: str) -> str:
-    # Generic entity extraction for patterns like:
-    # "fav char from/in <entity>" or "about <entity>".
-    patterns = [
-        r"\b(?:from|in)\s+([a-z0-9 ]{2,40})\b",
-        r"\babout\s+([a-z0-9 ]{2,40})\b",
+    filtered_hits = [
+        h
+        for h in top_hits
+        if h["similarity_normalized"] >= effective_threshold and h["similarity"] >= effective_raw_floor
     ]
-    for pattern in patterns:
-        m = re.search(pattern, message_l)
-        if not m:
-            continue
-        entity = re.sub(r"[^a-z0-9]+", "_", m.group(1)).strip("_")
-        if entity:
-            return entity
-    return ""
+    filtered_hits.sort(key=lambda x: x["rank_score"], reverse=True)
+    final_hits = filtered_hits[: max(1, MAX_INJECT)]
 
+    log_event(
+        "memory_retrieval_debug",
+        user_id=user_id,
+        user_query=query,
+        query_topic=topic,
+        query_embedding=[round(float(x), 6) for x in query_vector],
+        retrieved_memories=[_serialize_hit(h) for h in top_hits],
+        filtered_memories=[_serialize_hit(h) for h in filtered_hits],
+        final_injected_memories=[_serialize_hit(h) for h in final_hits],
+        top_k=TOP_K,
+        similarity_threshold=effective_threshold,
+        raw_similarity_floor=effective_raw_floor,
+        memory_intent=memory_intent,
+        max_inject=MAX_INJECT,
+    )
 
-def _infer_query_context(msg_tokens: set[str]) -> tuple[str, str]:
-    # Returns (domain, category)
-    if {"name", "college", "year", "identity"}.intersection(msg_tokens):
-        return "identity", ""
-    if {"who", "am", "i"}.issubset(msg_tokens):
-        return "identity", ""
-    if {"food", "drink", "drinks", "gym", "lifestyle", "eat"}.intersection(msg_tokens):
-        if {"food", "eat"}.intersection(msg_tokens):
-            return "lifestyle", "food"
-        if {"drink", "drinks"}.intersection(msg_tokens):
-            return "lifestyle", "drinks"
-        if {"gym"}.intersection(msg_tokens):
-            return "lifestyle", "gym"
-        return "lifestyle", ""
-    if {"today", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "schedule", "important", "when"}.intersection(msg_tokens):
-        return "lifestyle", "upcoming"
-    if {"anime", "character", "char", "mc"}.intersection(msg_tokens):
-        return "entertainment", "character"
-    if {"c++", "mongodb", "groq", "tech", "stack"}.intersection(msg_tokens):
-        return "technical_stack", ""
-    return "", ""
+    if not final_hits:
+        return ""
+
+    lines = [f"- {h['memory_text']}" for h in final_hits]
+    return "\n".join(lines)

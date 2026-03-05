@@ -309,4 +309,3 @@ ENABLE_TOOL_SANDBOX=true
 - Local JSON vector fallback is convenient for development but not for distributed consistency.
 - Optional Celery wiring exists, but FastAPI `BackgroundTasks` is the default execution path.
 - Legacy frontend file `frontend/script.js` is still present; primary UI is `frontend/app.jsx`.
-#fixed readme

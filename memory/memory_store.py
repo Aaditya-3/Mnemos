@@ -9,7 +9,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .memory_schema import Memory
 from backend.app.core.db.mongo import get_db
@@ -55,6 +55,8 @@ class MemoryStore:
                                 dirty = True
                             if self._backfill_metadata(memory):
                                 dirty = True
+                            if self._ensure_memory_features(memory):
+                                dirty = True
                             if self._is_broad_rule(memory):
                                 capped = min(max(memory.confidence, 0.5), 0.55)
                                 if capped != memory.confidence:
@@ -85,6 +87,8 @@ class MemoryStore:
                         memory.confidence = 0.5
                         dirty = True
                     if self._backfill_metadata(memory):
+                        dirty = True
+                    if self._ensure_memory_features(memory):
                         dirty = True
                     if self._is_broad_rule(memory):
                         capped = min(max(memory.confidence, 0.5), 0.55)
@@ -119,6 +123,9 @@ class MemoryStore:
         except Exception:
             pass
 
+    def save(self):
+        self._save()
+
     def add_or_update_memory(self, memory: Memory) -> Optional[Memory]:
         """
         Add new memory or update existing one.
@@ -136,6 +143,7 @@ class MemoryStore:
         if existing_exact:
             existing_exact.confidence = min(1.0, existing_exact.confidence + 0.1)
             self._apply_confidence_policy(existing_exact)
+            self._ensure_memory_features(existing_exact)
             existing_exact.last_updated = datetime.now()
             self._save()
             return existing_exact
@@ -156,8 +164,12 @@ class MemoryStore:
                 self._unindex_memory(existing, value_override=old_value)
                 existing.value = memory.value
                 existing.confidence = 0.7
+                existing.embedding = []
                 self._index_memory(existing)
+            existing.memory_type = memory.memory_type
+            existing.importance_score = memory.importance_score
             self._apply_confidence_policy(existing)
+            self._ensure_memory_features(existing)
             existing.last_updated = datetime.now()
             self._save()
             return existing
@@ -365,6 +377,8 @@ class MemoryStore:
         key = (memory.key or "").strip().lower()
         value = (memory.value or "").strip()
         value_l = value.lower()
+        raw_key_before = key
+        raw_value_before = value_l
 
         drop_keys = {
             "contextual_conversation_topic",
@@ -488,6 +502,9 @@ class MemoryStore:
         memory.key = key
         memory.value = value
         self._backfill_metadata(memory)
+        self._ensure_memory_features(memory)
+        if key != raw_key_before or value_l != raw_value_before:
+            memory.embedding = []
         return memory
 
     def _backfill_metadata(self, memory: Memory) -> bool:
@@ -569,6 +586,67 @@ class MemoryStore:
         if updated:
             memory.metadata = md
         return updated
+
+    def _ensure_memory_features(self, memory: Memory) -> bool:
+        changed = False
+        inferred_type = self._infer_memory_type(memory)
+        current_type = str(memory.memory_type or "").strip().lower()
+        if not current_type or current_type == "general":
+            memory.memory_type = inferred_type
+            changed = True
+
+        if memory.embedding is None:
+            memory.embedding = []
+            changed = True
+        elif not isinstance(memory.embedding, list):
+            memory.embedding = []
+            changed = True
+
+        inferred_importance = self._infer_importance_score(memory)
+        if not isinstance(memory.importance_score, (float, int)) or memory.importance_score <= 0:
+            memory.importance_score = inferred_importance
+            changed = True
+        else:
+            bounded = max(0.0, min(1.0, float(memory.importance_score)))
+            if bounded != float(memory.importance_score):
+                memory.importance_score = bounded
+                changed = True
+        return changed
+
+    def _infer_importance_score(self, memory: Memory) -> float:
+        md = memory.metadata or {}
+        importance = str(md.get("importance", "")).lower().strip()
+        if importance == "critical":
+            return 0.95
+        if memory.type == "constraint":
+            return max(0.75, float(memory.confidence))
+        if memory.type == "preference":
+            return max(0.6, float(memory.confidence))
+        return max(0.5, float(memory.confidence))
+
+    def _infer_memory_type(self, memory: Memory) -> str:
+        key_l = (memory.key or "").lower()
+        value_l = (memory.value or "").lower()
+        md = memory.metadata or {}
+        category_l = str(md.get("category", "")).lower()
+        subject_l = str(md.get("subject", "")).lower()
+        joined = " ".join([key_l, value_l, category_l, subject_l])
+
+        if key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
+            return "favorite_anime"
+        if key_l == "lifestyle.food" or "food" in joined or "eat" in joined:
+            return "food_preference"
+        if key_l == "lifestyle.drinks" or "drink" in joined or "beverage" in joined or "cola" in joined:
+            return "drink_preference"
+        if key_l.startswith("core_identity.") or memory.type == "fact":
+            return "personal_fact"
+        if key_l.startswith("technical_stack.") or "work" in joined or "job" in joined or "company" in joined:
+            return "work"
+        if "girlfriend" in joined or "boyfriend" in joined or "wife" in joined or "husband" in joined:
+            return "relationship"
+        if "hobby" in joined or "gym" in joined or "sport" in joined or memory.type == "preference":
+            return "hobby"
+        return "personal_fact"
 
     def ensure_bootstrap_memories(self, user_id: str):
         # Kept as a no-op for backward compatibility with existing callers.
