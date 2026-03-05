@@ -5,6 +5,7 @@ Semantic memory ingestion, ranking, decay, compression, and re-embedding.
 from __future__ import annotations
 
 import math
+import os
 import re
 import time
 from collections import defaultdict
@@ -37,6 +38,7 @@ FACT_PATTERNS = [
     r"\bi study\b",
 ]
 TRANSIENT_TOKENS = {"today", "tomorrow", "this week", "right now", "currently"}
+SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.75"))
 
 
 class SemanticMemoryService:
@@ -216,6 +218,8 @@ class SemanticMemoryService:
         for hit in ranked:
             if len(selected) >= top_k:
                 break
+            if float(hit.similarity) < SEMANTIC_SIMILARITY_THRESHOLD:
+                continue
             if hit.memory.importance_score < self.runtime.memory_archive_threshold:
                 continue
             est = max(1, len(hit.memory.content) // 4)

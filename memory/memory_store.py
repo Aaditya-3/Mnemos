@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
+from backend.app.embeddings.provider import get_embedding_provider
 from .memory_schema import Memory
 from backend.app.core.db.mongo import get_db
 
@@ -25,6 +26,7 @@ class MemoryStore:
         self._key_index: dict[tuple[str, str], set[str]] = {}
         self._key_value_index: dict[tuple[str, str, str], str] = {}
         self._storage_path = Path(__file__).resolve().parent / "memories.json"
+        self._embedder = None
         mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
         if mongo_enabled:
             try:
@@ -138,17 +140,22 @@ class MemoryStore:
             return None
 
         self._apply_confidence_policy(memory)
+        self._ensure_memory_features(memory)
+        self._ensure_embedding(memory)
 
         existing_exact = self._find_by_key_value(memory.key, memory.user_id, memory.value)
         if existing_exact:
             existing_exact.confidence = min(1.0, existing_exact.confidence + 0.1)
             self._apply_confidence_policy(existing_exact)
             self._ensure_memory_features(existing_exact)
+            self._ensure_embedding(existing_exact)
             existing_exact.last_updated = datetime.now()
             self._save()
             return existing_exact
 
         if self._should_keep_multiple_values(memory):
+            self._ensure_memory_features(memory)
+            self._ensure_embedding(memory)
             self._memories[memory.id] = memory
             self._index_memory(memory)
             self._enforce_key_bucket_limit(memory.user_id, memory.key, MAX_VALUES_PER_KEY)
@@ -170,10 +177,13 @@ class MemoryStore:
             existing.importance_score = memory.importance_score
             self._apply_confidence_policy(existing)
             self._ensure_memory_features(existing)
+            self._ensure_embedding(existing)
             existing.last_updated = datetime.now()
             self._save()
             return existing
 
+        self._ensure_memory_features(memory)
+        self._ensure_embedding(memory)
         self._memories[memory.id] = memory
         self._index_memory(memory)
         self._save()
@@ -591,7 +601,7 @@ class MemoryStore:
         changed = False
         inferred_type = self._infer_memory_type(memory)
         current_type = str(memory.memory_type or "").strip().lower()
-        if not current_type or current_type == "general":
+        if current_type != inferred_type:
             memory.memory_type = inferred_type
             changed = True
 
@@ -613,6 +623,34 @@ class MemoryStore:
                 changed = True
         return changed
 
+    def _embedding_text(self, memory: Memory) -> str:
+        key = re.sub(r"\s+", " ", str(memory.key or "").strip())
+        value = re.sub(r"\s+", " ", str(memory.value or "").strip())
+        if key and value:
+            return f"{key}: {value}"
+        return value or key
+
+    def _ensure_embedding(self, memory: Memory):
+        """
+        Persist deterministic memory embeddings during writes so retrieval does not
+        rely on lazy enrichment.
+        """
+        existing = list(memory.embedding or [])
+        if existing:
+            return
+        text = self._embedding_text(memory)
+        if not text:
+            return
+        try:
+            if self._embedder is None:
+                self._embedder = get_embedding_provider()
+            vector = list(self._embedder.embed(text).vector or [])
+            if vector:
+                memory.embedding = vector
+        except Exception:
+            # Keep memory persistence resilient even if embedding generation fails.
+            memory.embedding = list(memory.embedding or [])
+
     def _infer_importance_score(self, memory: Memory) -> float:
         md = memory.metadata or {}
         importance = str(md.get("importance", "")).lower().strip()
@@ -630,18 +668,31 @@ class MemoryStore:
         md = memory.metadata or {}
         category_l = str(md.get("category", "")).lower()
         subject_l = str(md.get("subject", "")).lower()
+        domain_l = str(md.get("domain", "")).lower()
+        current = str(memory.memory_type or "").strip().lower()
         joined = " ".join([key_l, value_l, category_l, subject_l])
 
-        if key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
-            return "favorite_anime"
-        if key_l == "lifestyle.food" or "food" in joined or "eat" in joined:
-            return "food_preference"
-        if key_l == "lifestyle.drinks" or "drink" in joined or "beverage" in joined or "cola" in joined:
-            return "drink_preference"
-        if key_l.startswith("core_identity.") or memory.type == "fact":
+        if current == "preference_anime" or current == "favorite_anime":
+            return "preference_anime"
+        if current == "preference_food" or current == "food_preference":
+            return "preference_food"
+        if current == "preference_drink" or current == "drink_preference":
+            return "preference_drink"
+        if current == "career" or current == "work":
+            return "career"
+        if current in {"relationship", "hobby", "personal_fact"}:
+            return current
+
+        if domain_l == "entertainment" or key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
+            return "preference_anime"
+        if key_l == "lifestyle.food" or (domain_l == "lifestyle" and "food" in category_l) or "food" in joined or "eat" in joined:
+            return "preference_food"
+        if key_l == "lifestyle.drinks" or (domain_l == "lifestyle" and "drink" in category_l) or "drink" in joined or "beverage" in joined:
+            return "preference_drink"
+        if key_l.startswith("core_identity.") or domain_l == "identity" or memory.type == "fact":
             return "personal_fact"
-        if key_l.startswith("technical_stack.") or "work" in joined or "job" in joined or "company" in joined:
-            return "work"
+        if key_l.startswith("technical_stack.") or domain_l in {"technical_stack", "career", "work"} or "work" in joined or "job" in joined or "company" in joined:
+            return "career"
         if "girlfriend" in joined or "boyfriend" in joined or "wife" in joined or "husband" in joined:
             return "relationship"
         if "hobby" in joined or "gym" in joined or "sport" in joined or memory.type == "preference":

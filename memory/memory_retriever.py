@@ -1,7 +1,7 @@
 """
 Memory Retriever
 
-Topic-aware semantic retrieval pipeline for deterministic memory injection.
+Logical semantic retrieval pipeline for deterministic memory injection.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,19 +27,25 @@ SIMILARITY_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_SIMILARITY", "0.7")
 RECENCY_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_RECENCY", "0.2"))
 IMPORTANCE_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_WEIGHT_IMPORTANCE", "0.1"))
 
-_TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "favorite_anime": ("anime", "show", "series", "character", "mc", "manga"),
-    "drink_preference": ("drink", "drinks", "beverage", "soda", "cola", "juice"),
-    "food_preference": ("food", "eat", "meal", "cuisine", "dish"),
-    "hobby": ("hobby", "hobbies", "sport", "sports", "gym", "music", "game"),
-    "relationship": ("relationship", "partner", "girlfriend", "boyfriend", "wife", "husband"),
-    "work": ("work", "job", "office", "project", "company", "tech", "stack", "backend", "frontend"),
-    "personal_fact": ("name", "age", "college", "university", "city", "where am i from"),
-}
+TOPIC_SCORE_THRESHOLD = float(os.getenv("MEMORY_RETRIEVER_TOPIC_SCORE_THRESHOLD", "0.23"))
+TOPIC_SEMANTIC_WEIGHT = float(os.getenv("MEMORY_RETRIEVER_TOPIC_SEMANTIC_WEIGHT", "0.68"))
+TOPIC_MIN_SEMANTIC = float(os.getenv("MEMORY_RETRIEVER_TOPIC_MIN_SEMANTIC", "0.10"))
+NON_INTENT_SIMILARITY_THRESHOLD = float(os.getenv("MEMORY_RETRIEVER_NON_INTENT_SIM_THRESHOLD", "0.90"))
+NON_INTENT_RAW_FLOOR = float(os.getenv("MEMORY_RETRIEVER_NON_INTENT_RAW_FLOOR", "0.12"))
+
+CANONICAL_TYPES = (
+    "preference_anime",
+    "preference_food",
+    "preference_drink",
+    "personal_fact",
+    "hobby",
+    "relationship",
+    "career",
+)
 
 
 def _word_tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9']+", (text or "").lower()))
+    return {t for t in re.findall(r"[a-z0-9']+", (text or "").lower()) if len(t) >= 2}
 
 
 def _is_memory_intent(query: str) -> bool:
@@ -69,6 +76,17 @@ def _is_memory_intent(query: str) -> bool:
     return any(re.search(p, text) for p in patterns)
 
 
+def _memory_intent_kind(query: str) -> str:
+    tokens = _word_tokens(query)
+    preference_markers = {"favorite", "favourite", "fav", "like", "likes", "prefer", "preference", "preferences"}
+    fact_markers = {"name", "age", "college", "university", "where", "who"}
+    if tokens.intersection(preference_markers):
+        return "preference"
+    if tokens.intersection(fact_markers):
+        return "fact"
+    return ""
+
+
 def _memory_text(memory: Any) -> str:
     key = re.sub(r"\s+", " ", str(getattr(memory, "key", "") or "").strip())
     value = re.sub(r"\s+", " ", str(getattr(memory, "value", "") or "").strip())
@@ -77,65 +95,70 @@ def _memory_text(memory: Any) -> str:
     return value or key
 
 
-def _infer_memory_type(memory: Any) -> str:
+def _metadata(memory: Any) -> dict[str, Any]:
+    raw = getattr(memory, "metadata", None)
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def _normalize_memory_type(memory: Any) -> str:
     current = str(getattr(memory, "memory_type", "") or "").strip().lower()
-    if current:
+    key_l = str(getattr(memory, "key", "") or "").strip().lower()
+    value_l = str(getattr(memory, "value", "") or "").strip().lower()
+    mem_kind = str(getattr(memory, "type", "") or "").strip().lower()
+    md = _metadata(memory)
+    domain = str(md.get("domain") or "").strip().lower()
+    category = str(md.get("category") or "").strip().lower()
+    subject = str(md.get("subject") or "").strip().lower()
+    joined = " ".join([current, key_l, value_l, domain, category, subject])
+
+    # Keep canonical type if already valid.
+    if current in CANONICAL_TYPES:
         return current
 
-    key_l = str(getattr(memory, "key", "") or "").lower()
-    value_l = str(getattr(memory, "value", "") or "").lower()
-    mem_type = str(getattr(memory, "type", "") or "").lower()
-    joined = " ".join([key_l, value_l])
+    # Compatibility normalization for older labels.
+    if current in {"favorite_anime", "anime_preference"}:
+        return "preference_anime"
+    if current in {"food_preference", "preference_food"}:
+        return "preference_food"
+    if current in {"drink_preference", "preference_drink"}:
+        return "preference_drink"
+    if current in {"work", "career"}:
+        return "career"
+    if current in {"personal_fact"}:
+        return "personal_fact"
 
-    if key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
-        return "favorite_anime"
-    if key_l == "lifestyle.drinks" or any(t in joined for t in ("drink", "beverage", "cola", "soda")):
-        return "drink_preference"
-    if key_l == "lifestyle.food" or any(t in joined for t in ("food", "eat", "meal", "dish")):
-        return "food_preference"
-    if key_l.startswith("technical_stack.") or any(t in joined for t in ("work", "job", "project", "company")):
-        return "work"
-    if any(t in joined for t in ("girlfriend", "boyfriend", "wife", "husband", "relationship")):
+    if domain == "entertainment" or key_l.startswith("entertainment.") or "anime" in joined or "character" in joined:
+        return "preference_anime"
+    if domain == "lifestyle" and ("drink" in category or key_l.startswith("lifestyle.drink") or "beverage" in joined):
+        return "preference_drink"
+    if domain == "lifestyle" and ("food" in category or key_l.startswith("lifestyle.food") or "eat" in joined):
+        return "preference_food"
+    if domain in {"technical_stack", "career", "work"} or key_l.startswith("technical_stack."):
+        return "career"
+    if any(x in joined for x in ("girlfriend", "boyfriend", "wife", "husband", "relationship", "partner")):
         return "relationship"
-    if "gym" in joined or "hobby" in joined or mem_type == "preference":
+    if domain == "identity" or key_l.startswith("core_identity.") or mem_kind == "fact":
+        return "personal_fact"
+    if mem_kind == "preference":
         return "hobby"
+
     return "personal_fact"
 
 
-def _detect_query_topic(query: str) -> str:
-    text = (query or "").lower()
-    if not text:
-        return ""
-
-    # Prioritize stronger topic identifiers first.
-    priority = (
-        "favorite_anime",
-        "drink_preference",
-        "food_preference",
-        "relationship",
-        "work",
-        "hobby",
-        "personal_fact",
-    )
-    for topic in priority:
-        keywords = _TOPIC_KEYWORDS.get(topic, ())
-        if any(k in text for k in keywords):
-            return topic
-    return ""
-
-
-def _topic_match(memory: Any, topic: str) -> bool:
-    if not topic:
-        return True
-
-    memory_type = _infer_memory_type(memory)
-    if memory_type == topic:
-        return True
-
-    # Fallback lexical guard for legacy memories with weak typing.
-    text = _memory_text(memory).lower()
-    keywords = _TOPIC_KEYWORDS.get(topic, ())
-    return any(k in text for k in keywords)
+def _memory_feature_text(memory: Any, normalized_type: str) -> str:
+    md = _metadata(memory)
+    return " ".join(
+        [
+            str(getattr(memory, "key", "") or ""),
+            str(getattr(memory, "value", "") or ""),
+            normalized_type,
+            str(md.get("domain") or ""),
+            str(md.get("category") or ""),
+            str(md.get("subject") or ""),
+        ]
+    ).strip()
 
 
 def _importance_score(memory: Any) -> float:
@@ -175,11 +198,81 @@ def _serialize_hit(hit: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _vector_mean(vectors: list[list[float]]) -> list[float]:
+    if not vectors:
+        return []
+    dims = len(vectors[0])
+    if dims == 0:
+        return []
+    out = [0.0] * dims
+    count = 0
+    for vec in vectors:
+        if len(vec) != dims:
+            continue
+        for i in range(dims):
+            out[i] += float(vec[i])
+        count += 1
+    if count <= 0:
+        return []
+    out = [x / count for x in out]
+    norm = math.sqrt(sum(v * v for v in out))
+    if norm <= 0:
+        return []
+    return [v / norm for v in out]
+
+
+def _detect_query_topic(
+    query: str,
+    query_vector: list[float],
+    grouped_entries: dict[str, list[dict[str, Any]]],
+) -> tuple[str, float, list[dict[str, Any]]]:
+    query_tokens = _word_tokens(query)
+    if not grouped_entries:
+        return "", 0.0, []
+
+    results: list[dict[str, Any]] = []
+    lexical_weight = max(0.0, 1.0 - TOPIC_SEMANTIC_WEIGHT)
+    for memory_type, rows in grouped_entries.items():
+        type_tokens: set[str] = set()
+        vectors: list[list[float]] = []
+        for row in rows:
+            type_tokens.update(_word_tokens(str(row.get("feature_text") or "")))
+            emb = list(row.get("embedding") or [])
+            if emb:
+                vectors.append(emb)
+
+        centroid = _vector_mean(vectors)
+        semantic_score = cosine_similarity(query_vector, centroid) if query_vector and centroid else 0.0
+        if query_tokens:
+            overlap = len(query_tokens.intersection(type_tokens))
+            lexical_score = overlap / max(1, len(query_tokens))
+        else:
+            lexical_score = 0.0
+        topic_score = (semantic_score * TOPIC_SEMANTIC_WEIGHT) + (lexical_score * lexical_weight)
+        results.append(
+            {
+                "memory_type": memory_type,
+                "semantic_score": max(0.0, min(1.0, float(semantic_score))),
+                "lexical_score": max(0.0, min(1.0, float(lexical_score))),
+                "topic_score": max(0.0, min(1.0, float(topic_score))),
+                "memory_count": len(rows),
+            }
+        )
+
+    results.sort(key=lambda x: x["topic_score"], reverse=True)
+    if not results:
+        return "", 0.0, []
+    best = results[0]
+    if best["topic_score"] < TOPIC_SCORE_THRESHOLD or best["semantic_score"] < TOPIC_MIN_SEMANTIC:
+        return "", float(best["topic_score"]), results[:6]
+    return str(best["memory_type"]), float(best["topic_score"]), results[:6]
+
+
 def retrieve_memories(user_message: str, user_id: str) -> str:
     """
     Retrieval pipeline:
-    query -> topic detection -> type filter -> vector search -> similarity threshold
-    -> weighted rank -> top-3 injection.
+    query -> embedding -> topic inference -> type filter -> vector search
+    -> threshold filter -> weighted rank -> top-3 injection.
     """
     query = (user_message or "").strip()
     if not query:
@@ -193,31 +286,9 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
             user_id=user_id,
             user_query=query,
             query_topic="",
+            topic_confidence=0.0,
+            topic_candidates=[],
             query_embedding=[],
-            retrieved_memories=[],
-            filtered_memories=[],
-            final_injected_memories=[],
-        )
-        return ""
-
-    topic = _detect_query_topic(query)
-    memory_intent = _is_memory_intent(query)
-    type_filtered = [m for m in memories if _topic_match(m, topic)]
-    if topic and not type_filtered:
-        # Known topic but no matching typed memory means "no relevant memory found".
-        type_filtered = []
-    elif not topic:
-        type_filtered = list(memories)
-
-    if not type_filtered:
-        embedder = get_embedding_provider()
-        query_embedding = embedder.embed(query).vector
-        log_event(
-            "memory_retrieval_debug",
-            user_id=user_id,
-            user_query=query,
-            query_topic=topic,
-            query_embedding=[round(float(x), 6) for x in query_embedding],
             retrieved_memories=[],
             filtered_memories=[],
             final_injected_memories=[],
@@ -227,12 +298,15 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
     embedder = get_embedding_provider()
     query_vector = list(embedder.embed(query).vector or [])
     vector_dims = len(query_vector)
+    memory_intent = _is_memory_intent(query)
+    intent_kind = _memory_intent_kind(query)
 
-    retrieved_hits: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
+    grouped_entries: dict[str, list[dict[str, Any]]] = defaultdict(list)
     dirty = False
 
-    for memory in type_filtered:
-        memory_type = _infer_memory_type(memory)
+    for memory in memories:
+        memory_type = _normalize_memory_type(memory)
         if str(getattr(memory, "memory_type", "") or "").strip().lower() != memory_type:
             memory.memory_type = memory_type
             dirty = True
@@ -252,7 +326,70 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
         if not embedding:
             continue
 
-        similarity = cosine_similarity(query_vector, embedding)
+        feature_text = _memory_feature_text(memory, memory_type)
+        row = {
+            "memory": memory,
+            "memory_id": str(getattr(memory, "id", "")),
+            "memory_text": memory_text,
+            "memory_type": memory_type,
+            "embedding": embedding,
+            "feature_text": feature_text,
+        }
+        entries.append(row)
+        grouped_entries[memory_type].append(row)
+
+    if dirty:
+        try:
+            store.save()
+        except Exception:
+            pass
+
+    if not entries:
+        log_event(
+            "memory_retrieval_debug",
+            user_id=user_id,
+            user_query=query,
+            query_topic="",
+            topic_confidence=0.0,
+            topic_candidates=[],
+            query_embedding=[round(float(x), 6) for x in query_vector],
+            retrieved_memories=[],
+            filtered_memories=[],
+            final_injected_memories=[],
+        )
+        return ""
+
+    topic, topic_confidence, topic_candidates = _detect_query_topic(query, query_vector, grouped_entries)
+    type_filtered = grouped_entries.get(topic, []) if topic else entries
+    if not type_filtered:
+        type_filtered = []
+    if not topic and intent_kind == "preference":
+        preference_rows = [
+            row
+            for row in entries
+            if (
+                str(getattr(row.get("memory"), "type", "") or "").strip().lower() == "preference"
+                or row.get("memory_type") in {"preference_anime", "preference_food", "preference_drink", "hobby"}
+            )
+        ]
+        if preference_rows:
+            type_filtered = preference_rows
+    elif not topic and intent_kind == "fact":
+        fact_rows = [
+            row
+            for row in entries
+            if (
+                str(getattr(row.get("memory"), "type", "") or "").strip().lower() == "fact"
+                or row.get("memory_type") == "personal_fact"
+            )
+        ]
+        if fact_rows:
+            type_filtered = fact_rows
+
+    retrieved_hits: list[dict[str, Any]] = []
+    for row in type_filtered:
+        memory = row["memory"]
+        similarity = cosine_similarity(query_vector, list(row["embedding"]))
         similarity = max(0.0, min(1.0, float(similarity)))
         recency = _recency_score(memory)
         importance = _importance_score(memory)
@@ -261,12 +398,11 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
             + (recency * RECENCY_WEIGHT)
             + (importance * IMPORTANCE_WEIGHT)
         )
-
         retrieved_hits.append(
             {
-                "memory_id": str(getattr(memory, "id", "")),
-                "memory_text": memory_text,
-                "memory_type": memory_type,
+                "memory_id": row["memory_id"],
+                "memory_text": row["memory_text"],
+                "memory_type": row["memory_type"],
                 "similarity": similarity,
                 "similarity_normalized": similarity,
                 "recency": recency,
@@ -274,12 +410,6 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
                 "rank_score": rank_score,
             }
         )
-
-    if dirty:
-        try:
-            store.save()
-        except Exception:
-            pass
 
     retrieved_hits.sort(key=lambda x: x["similarity"], reverse=True)
     top_hits = retrieved_hits[: max(1, TOP_K)]
@@ -301,9 +431,12 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
 
     effective_threshold = SIMILARITY_THRESHOLD
     effective_raw_floor = RAW_SIMILARITY_FLOOR
-    if not topic and not memory_intent:
-        effective_threshold = max(0.9, SIMILARITY_THRESHOLD)
-        effective_raw_floor = max(0.12, RAW_SIMILARITY_FLOOR)
+    if not memory_intent:
+        effective_threshold = max(effective_threshold, NON_INTENT_SIMILARITY_THRESHOLD)
+        effective_raw_floor = max(effective_raw_floor, NON_INTENT_RAW_FLOOR)
+    elif not topic:
+        effective_threshold = max(effective_threshold, 0.80)
+        effective_raw_floor = max(effective_raw_floor, 0.08)
 
     filtered_hits = [
         h
@@ -318,6 +451,8 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
         user_id=user_id,
         user_query=query,
         query_topic=topic,
+        topic_confidence=round(float(topic_confidence), 6),
+        topic_candidates=topic_candidates,
         query_embedding=[round(float(x), 6) for x in query_vector],
         retrieved_memories=[_serialize_hit(h) for h in top_hits],
         filtered_memories=[_serialize_hit(h) for h in filtered_hits],
@@ -326,6 +461,7 @@ def retrieve_memories(user_message: str, user_id: str) -> str:
         similarity_threshold=effective_threshold,
         raw_similarity_floor=effective_raw_floor,
         memory_intent=memory_intent,
+        memory_intent_kind=intent_kind,
         max_inject=MAX_INJECT,
     )
 

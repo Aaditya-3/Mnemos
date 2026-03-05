@@ -135,6 +135,17 @@ GENERIC_GREETING_LINE_PATTERNS = [
     r"^\s*it(?:'s| is)\s+great\s+to\s+see\s+you[.!]?\s*",
     r"^\s*great\s+to\s+see\s+you[.!]?\s*",
 ]
+FOCUS_STOPWORDS = {
+    "what", "which", "who", "when", "where", "why", "how",
+    "do", "does", "did", "is", "are", "am", "was", "were",
+    "can", "could", "would", "should", "will",
+    "a", "an", "the", "my", "mine", "your", "you", "i", "me", "it", "that", "this",
+    "about", "for", "with", "and", "or", "to", "of", "in", "on", "at", "from",
+    "fav", "favorite", "favourite", "preference", "preferences",
+}
+RESPONSE_MIN_SENTENCES = max(1, min(int(os.getenv("RESPONSE_MIN_SENTENCES", "2")), 5))
+RESPONSE_MAX_SENTENCES = max(RESPONSE_MIN_SENTENCES, min(int(os.getenv("RESPONSE_MAX_SENTENCES", "5")), 8))
+RESPONSE_SHORT_WORD_THRESHOLD = max(1, int(os.getenv("RESPONSE_SHORT_WORD_THRESHOLD", "6")))
 if not api_key_loaded:
     print("WARNING: GROQ_API_KEY not found. Create .env in project root and set GROQ_API_KEY=...")
 
@@ -321,7 +332,96 @@ def sanitize_response(user_message: str, reply: str) -> str:
         else:
             text = fallback
 
-    return text
+    return _apply_response_polish(user_message=user_message, reply=text)
+
+
+def _split_sentences(text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return []
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()]
+
+
+def _is_unknown_info_reply(text: str) -> bool:
+    value = _normalize_text_for_compare(text)
+    return (
+        "don't have that information yet" in value
+        or "do not have that information yet" in value
+        or "don't have any record of that" in value
+        or "do not have any record of that" in value
+        or value in {"unknown", "not sure"}
+    )
+
+
+def _extract_focus_phrase(user_message: str, max_tokens: int = 4) -> str:
+    tokens = [t for t in _word_tokens(user_message) if len(t) >= 3 and t not in FOCUS_STOPWORDS]
+    if not tokens:
+        return ""
+    return " ".join(tokens[:max_tokens])
+
+
+def _warm_short_response(text: str) -> str:
+    tokens = _word_tokens(text)
+    if not tokens:
+        return text
+    first = tokens[0]
+    if first in {"yes", "yep", "yeah", "correct", "true"}:
+        return "Yes, that's right."
+    if first in {"no", "nope", "nah", "false"}:
+        return "No, not exactly."
+    if _is_unknown_info_reply(text):
+        return "I don't have that information yet."
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+    if cleaned[-1] not in ".!?":
+        cleaned = f"{cleaned}."
+    return cleaned
+
+
+def _build_followup_hook(user_message: str) -> str:
+    focus = _extract_focus_phrase(user_message)
+    if focus:
+        return f"Want to explore {focus} a bit more?"
+    return "Want me to go one step deeper?"
+
+
+def _apply_response_polish(user_message: str, reply: str) -> str:
+    text = re.sub(r"\s+", " ", (reply or "").strip())
+    if not text:
+        return text
+
+    if len(_word_tokens(text)) < RESPONSE_SHORT_WORD_THRESHOLD:
+        text = _warm_short_response(text)
+
+    sentences = _split_sentences(text)
+    if not sentences:
+        return text
+
+    # Keep outputs concise.
+    sentences = sentences[:RESPONSE_MAX_SENTENCES]
+
+    if len(sentences) < RESPONSE_MIN_SENTENCES:
+        if _is_unknown_info_reply(text):
+            sentences.append("If you want, tell me now and I'll remember it.")
+        elif not _is_clear_greeting(user_message):
+            sentences.append("Hope that helps.")
+
+    should_add_hook = (
+        len(sentences) < RESPONSE_MAX_SENTENCES
+        and "?" not in " ".join(sentences)
+        and ("?" in (user_message or "") or _is_memory_lookup_request(user_message))
+        and not _is_clear_greeting(user_message)
+        and not _is_unknown_info_reply(" ".join(sentences))
+    )
+    if should_add_hook:
+        hook = _build_followup_hook(user_message)
+        if hook:
+            sentences.append(hook)
+
+    sentences = sentences[:RESPONSE_MAX_SENTENCES]
+    polished = " ".join(sentences).strip()
+    return polished
 
 
 def _normalize_text_for_compare(text: str) -> str:
@@ -517,7 +617,8 @@ current_chat_id: Optional[str] = None
 chat_storage_path = project_root / "memory" / "chat_sessions.json"
 MAX_USER_CHAT_TOKENS = int(os.getenv("MAX_USER_CHAT_TOKENS", "130000"))
 CHAT_HISTORY_MAX_TOKENS = int(os.getenv("CHAT_HISTORY_MAX_TOKENS", "3200"))
-CHAT_HISTORY_MAX_MESSAGES = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "40"))
+WORKING_MEMORY_MESSAGES = max(8, min(int(os.getenv("WORKING_MEMORY_MESSAGES", "10")), 12))
+CHAT_HISTORY_MAX_MESSAGES = WORKING_MEMORY_MESSAGES
 LONG_TERM_PROFILE_MAX_ITEMS = int(os.getenv("LONG_TERM_PROFILE_MAX_ITEMS", "40"))
 SESSION_TEMP_FACTS_MAX_ITEMS = int(os.getenv("SESSION_TEMP_FACTS_MAX_ITEMS", "14"))
 
@@ -1342,7 +1443,7 @@ def _semantic_memory_context(user_id: str, query: str) -> tuple[list[dict[str, A
     return service.retrieve_context(
         user_id=user_id,
         query=query,
-        top_k=settings.semantic_top_k,
+        top_k=min(3, settings.semantic_top_k),
         scopes=["user", "project", "conversation", "global"],
     )
 
@@ -1545,6 +1646,22 @@ def _top_unique_memory_values(memories: list[Any], limit: int = 3) -> list[str]:
     return out
 
 
+def _memory_line_to_statement(memory_line: str) -> str:
+    raw = re.sub(r"^\s*-\s*", "", str(memory_line or "").strip())
+    if not raw:
+        return ""
+    if ":" not in raw:
+        return raw
+    key, value = raw.split(":", 1)
+    key_text = re.sub(r"[._]+", " ", key).strip()
+    value_text = re.sub(r"\s+", " ", value).strip()
+    if not value_text:
+        return raw
+    if not key_text:
+        return value_text
+    return f"{key_text} is {value_text}"
+
+
 def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Optional[str]:
     query = (user_message or "").strip()
     if not query:
@@ -1555,75 +1672,40 @@ def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Opti
     if preference_reply:
         return preference_reply
 
-    store = get_memory_store()
-    memories = [
-        m
-        for m in store.get_memories_by_confidence(user_id=user_id, min_confidence=0.5)
-        if str(m.value or "").strip()
-    ]
-    if not memories:
-        return None
+    memory_lines = retrieve_memories(query, user_id)
+    if memory_lines:
+        raw_lines = [x.strip() for x in memory_lines.splitlines() if x.strip()]
+        statements: list[str] = []
+        seen = set()
+        for line in raw_lines:
+            statement = _memory_line_to_statement(line)
+            if not statement:
+                continue
+            marker = statement.lower()
+            if marker in seen:
+                continue
+            seen.add(marker)
+            statements.append(statement)
+            if len(statements) >= 3:
+                break
+        if statements:
+            if len(statements) == 1:
+                return f"From what you've shared, {statements[0]}."
+            return f"From what you've shared, {statements[0]}. I also remember {statements[1]}."
 
     msg_l = query.lower()
-    tokens = set(_word_tokens(msg_l))
-
-    query_specs = [
-        (
-            {"core_identity.name"},
-            {"name", "called", "identity"},
-            "Your name is {value}.",
-            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
-        ),
-        (
-            {"core_identity.college"},
-            {"college", "university", "school"},
-            "Your college is {value}.",
-            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
-        ),
-        (
-            {"core_identity.year"},
-            {"year", "graduation", "batch"},
-            "Your year is {value}.",
-            "From your stored profile, the strongest match is {top}. Other values I have are: {others}.",
-        ),
-        (
-            {"lifestyle.food"},
-            {"food", "eat", "meal"},
-            "Your preferred food is {value}.",
-            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
-        ),
-        (
-            {"lifestyle.drinks"},
-            {"drink", "drinks", "beverage", "soda"},
-            "Your preferred drink is {value}.",
-            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
-        ),
-        (
-            {"lifestyle.gym"},
-            {"gym", "workout", "fitness"},
-            "You said this about your fitness preference: {value}.",
-            "From your stored preferences, the strongest match is {top}. Other options I have are: {others}.",
-        ),
-    ]
-
-    for keys, markers, single_template, multi_template in query_specs:
-        if not markers.intersection(tokens):
-            continue
-        matched = [m for m in memories if str(m.key or "").lower() in keys]
-        matched.sort(key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)
-        values = _top_unique_memory_values(matched, limit=3)
-        if not values:
-            continue
-        if len(values) == 1:
-            return single_template.format(value=values[0])
-        return multi_template.format(top=values[0], others=", ".join(values[1:]))
-
     wants_preference_summary = bool(
         re.search(r"\bwhat\s+do\s+i\s+like\b", msg_l)
         or re.search(r"\bmy\s+preferences?\b", msg_l)
         or re.search(r"\bmy\s+likes?\b", msg_l)
     )
     if wants_preference_summary:
+        store = get_memory_store()
+        memories = [
+            m
+            for m in store.get_memories_by_confidence(user_id=user_id, min_confidence=0.5)
+            if str(m.value or "").strip()
+        ]
         pref_memories = [m for m in memories if str(m.type or "") == "preference"]
         pref_memories.sort(key=lambda m: (m.confidence, m.last_updated.timestamp()), reverse=True)
         values = _top_unique_memory_values(pref_memories, limit=3)
@@ -1643,7 +1725,7 @@ def _resolve_semantic_memory_reply(user_id: str, query: str) -> Optional[str]:
         rows, _ = service.retrieve_context(
             user_id=user_id,
             query=text,
-            top_k=min(4, settings.semantic_top_k),
+            top_k=min(3, settings.semantic_top_k),
             scopes=["user", "conversation", "project", "global"],
         )
     except Exception:
@@ -1654,7 +1736,7 @@ def _resolve_semantic_memory_reply(user_id: str, query: str) -> Optional[str]:
     strong = [
         r
         for r in rows
-        if float(r.get("similarity_score", 0.0)) >= 0.62 and float(r.get("final_score", 0.0)) >= 0.45
+        if float(r.get("similarity_score", 0.0)) >= 0.75 and float(r.get("final_score", 0.0)) >= 0.50
     ]
     if not strong:
         return None
@@ -1931,6 +2013,29 @@ async def chat(
             session_id=chat_id,
             usage=usage,
             model_used=str(usage.get("model") or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")),
+        )
+
+        log_event(
+            "chat_response_debug",
+            request_id=getattr(http_request.state, "request_id", ""),
+            user_id=user_id,
+            chat_id=chat_id,
+            user_query=user_message,
+            continuity_query=continuity_message,
+            memory_lookup=memory_lookup,
+            context_dependent=context_dependent,
+            direct_path=direct_path or "llm_generation",
+            deterministic_hints=deterministic_hints[:8],
+            semantic_rows=[
+                {
+                    "memory_id": row.get("memory_id"),
+                    "memory_type": row.get("memory_type"),
+                    "similarity_score": row.get("similarity_score"),
+                    "final_score": row.get("final_score"),
+                }
+                for row in (semantic_rows or [])[:3]
+            ],
+            final_response=reply,
         )
 
         log_event(

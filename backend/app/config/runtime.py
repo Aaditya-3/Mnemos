@@ -61,12 +61,12 @@ class OrchestratorRuntimeConfig:
 
 
 def get_runtime_config() -> OrchestratorRuntimeConfig:
-    sim = _float("MEM_RANK_WEIGHT_SIMILARITY", 0.60)
-    imp = _float("MEM_RANK_WEIGHT_IMPORTANCE", 0.25)
-    rec = _float("MEM_RANK_WEIGHT_RECENCY", 0.15)
+    sim = _float("MEM_RANK_WEIGHT_SIMILARITY", 0.70)
+    imp = _float("MEM_RANK_WEIGHT_IMPORTANCE", 0.10)
+    rec = _float("MEM_RANK_WEIGHT_RECENCY", 0.20)
     total = sim + imp + rec
     if total <= 0:
-        sim, imp, rec = 0.60, 0.25, 0.15
+        sim, imp, rec = 0.70, 0.10, 0.20
     else:
         sim, imp, rec = sim / total, imp / total, rec / total
 
@@ -86,4 +86,3 @@ def get_runtime_config() -> OrchestratorRuntimeConfig:
         enable_tool_sandbox=_bool("ENABLE_TOOL_SANDBOX", True),
         memory_scope_whitelist=("global", "user", "conversation", "project"),
     )
-
