@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 
-from backend.app.core.db.mongo import get_db
+from backend.app.core.db.relational import DBUser, get_relational_session
 
 
 JWT_SECRET = os.getenv("JWT_SECRET", "CHANGE_ME_SECRET")
@@ -59,15 +59,15 @@ async def get_current_user(
             detail="Invalid authentication token",
         )
 
-    db = get_db()
-    user = db["users"].find_one({"_id": user_id})
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
+    with get_relational_session() as db:
+        user = db.query(DBUser).filter(DBUser.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
 
-    # Attach to request.state for convenience
-    request.state.user = user
-    return user
+        # Attach to request.state for convenience
+        request.state.user = user
+        return user
 

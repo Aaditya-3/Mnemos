@@ -23,7 +23,14 @@ class VectorStoreClient(Protocol):
     def upsert(self, memory: SemanticMemory):
         ...
 
-    def search(self, vector: list[float], user_id: str, top_k: int, scopes: list[str] | None = None):
+    def search(
+        self,
+        vector: list[float],
+        user_id: str,
+        top_k: int,
+        scopes: list[str] | None = None,
+        importance_levels: list[str] | None = None,
+    ):
         ...
 
     def list_user_memories(self, user_id: str) -> list[SemanticMemory]:
@@ -32,3 +39,5 @@ class VectorStoreClient(Protocol):
     def delete_memory(self, user_id: str, memory_id: str) -> bool:
         ...
 
+    def has_duplicate(self, query_vector: list[float], user_id: str, threshold: float = 0.95) -> tuple[bool, float]:
+        ...

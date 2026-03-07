@@ -23,6 +23,9 @@ class EmbeddingProvider:
     def embed(self, text: str) -> EmbeddingVector:
         raise NotImplementedError
 
+    def embed_batch(self, texts: list[str]) -> list[EmbeddingVector]:
+        return [self.embed(text) for text in texts]
+
 
 class LocalHashEmbeddingProvider(EmbeddingProvider):
     """
@@ -56,6 +59,20 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
         vector = self.model.encode((text or "").strip(), normalize_embeddings=True).tolist()
         return EmbeddingVector(vector=[float(x) for x in vector], model=self.model_name, provider="sentence_transformers")
 
+    def embed_batch(self, texts: list[str]) -> list[EmbeddingVector]:
+        clean = [(text or "").strip() for text in texts]
+        vectors = self.model.encode(clean, normalize_embeddings=True)
+        out: list[EmbeddingVector] = []
+        for vector in vectors:
+            out.append(
+                EmbeddingVector(
+                    vector=[float(x) for x in vector.tolist()],
+                    model=self.model_name,
+                    provider="sentence_transformers",
+                )
+            )
+        return out
+
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, model_name: str):
@@ -72,6 +89,23 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         response = self.client.embeddings.create(model=self.model_name, input=(text or "").strip())
         data = response.data[0].embedding
         return EmbeddingVector(vector=[float(x) for x in data], model=self.model_name, provider="openai")
+
+    def embed_batch(self, texts: list[str]) -> list[EmbeddingVector]:
+        clean = [(text or "").strip() for text in texts]
+        if not clean:
+            return []
+        response = self.client.embeddings.create(model=self.model_name, input=clean)
+        out: list[EmbeddingVector] = []
+        ordered = sorted(response.data, key=lambda row: int(getattr(row, "index", 0)))
+        for item in ordered:
+            out.append(
+                EmbeddingVector(
+                    vector=[float(x) for x in item.embedding],
+                    model=self.model_name,
+                    provider="openai",
+                )
+            )
+        return out
 
 
 _provider_cache: EmbeddingProvider | None = None
@@ -118,4 +152,3 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if na <= 0 or nb <= 0:
         return 0.0
     return dot / ((na ** 0.5) * (nb ** 0.5))
-

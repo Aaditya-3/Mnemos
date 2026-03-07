@@ -38,7 +38,6 @@ from memory.memory_extractor import extract_memory
 from memory.memory_retriever import retrieve_memories
 from memory.memory_store import get_memory_store
 from backend.app.core.tools.realtime_info import should_fetch_realtime, get_realtime_context
-from backend.app.core.db.mongo import get_db
 from backend.app.core.db.relational import (
     DBChatMessage,
     DBChatSession,
@@ -74,7 +73,6 @@ setup_logging()
 brain_service = get_brain_service(project_root)
 api_key_loaded = bool(os.getenv("GROQ_API_KEY"))
 realtime_web_enabled = os.getenv("ENABLE_REALTIME_WEB", "true").strip().lower() in {"1", "true", "yes", "on"}
-mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
 SEMANTIC_STOPWORDS = {
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "to", "of", "in", "on", "for", "and", "or", "but", "with", "about",
@@ -520,6 +518,17 @@ app.include_router(simple_auth_router)
 app.include_router(platform_router)
 
 
+@app.on_event("startup")
+async def initialize_semantic_memory_backend():
+    if not settings.enable_semantic_memory:
+        return
+    try:
+        get_semantic_memory_service()
+    except Exception as exc:
+        log_event("semantic_memory_startup_init_failed", error=str(exc))
+        raise
+
+
 @app.post("/auth/token/issue")
 async def issue_tokens(x_user_id: str = Header(..., alias="X-User-ID")):
     user_id = (x_user_id or "").strip()
@@ -621,22 +630,6 @@ WORKING_MEMORY_MESSAGES = max(8, min(int(os.getenv("WORKING_MEMORY_MESSAGES", "1
 CHAT_HISTORY_MAX_MESSAGES = WORKING_MEMORY_MESSAGES
 LONG_TERM_PROFILE_MAX_ITEMS = int(os.getenv("LONG_TERM_PROFILE_MAX_ITEMS", "40"))
 SESSION_TEMP_FACTS_MAX_ITEMS = int(os.getenv("SESSION_TEMP_FACTS_MAX_ITEMS", "14"))
-
-if mongo_enabled:
-    try:
-        _db = get_db()
-        chat_collection = _db["chat_sessions"]
-    except Exception:
-        chat_collection = None
-else:
-    chat_collection = None
-
-
-def _disable_chat_mongo(reason: str):
-    global chat_collection
-    if chat_collection is not None:
-        print(f"INFO: MongoDB chat storage disabled for this run: {reason}")
-    chat_collection = None
 
 
 def _synthetic_username_for_user_id(user_id: str) -> str:
@@ -764,25 +757,6 @@ def _load_chat_sessions_from_relational() -> int:
         chat_sessions[session.id] = session
 
     return len(session_rows)
-
-
-def _load_legacy_chat_sessions_from_mongo() -> list[ChatSession]:
-    if chat_collection is None:
-        return []
-    try:
-        data = list(chat_collection.find({}, {"_id": 0}))
-    except Exception as exc:
-        _disable_chat_mongo(str(exc))
-        return []
-    out: list[ChatSession] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        try:
-            out.append(ChatSession.from_dict(item))
-        except Exception:
-            continue
-    return out
 
 
 def _load_legacy_chat_sessions_from_json() -> list[ChatSession]:
@@ -1272,9 +1246,7 @@ def load_chat_sessions():
     if loaded > 0:
         return
 
-    legacy = _load_legacy_chat_sessions_from_mongo()
-    if not legacy:
-        legacy = _load_legacy_chat_sessions_from_json()
+    legacy = _load_legacy_chat_sessions_from_json()
     if not legacy:
         return
 
@@ -1431,6 +1403,13 @@ class UserSettingsUpdate(BaseModel):
     reasoning_mode: Optional[str] = None
 
 
+class TestMemoryRequest(BaseModel):
+    message: str = "I prefer concise technical answers."
+    query: Optional[str] = None
+    importance: Optional[str] = None
+    scope: Optional[str] = None
+
+
 def _deterministic_memory_context(query: str, user_id: str) -> str:
     try:
         return retrieve_memories(query, user_id)
@@ -1443,7 +1422,7 @@ def _semantic_memory_context(user_id: str, query: str) -> tuple[list[dict[str, A
     return service.retrieve_context(
         user_id=user_id,
         query=query,
-        top_k=min(3, settings.semantic_top_k),
+        top_k=min(5, settings.semantic_top_k),
         scopes=["user", "project", "conversation", "global"],
     )
 
@@ -1725,7 +1704,7 @@ def _resolve_semantic_memory_reply(user_id: str, query: str) -> Optional[str]:
         rows, _ = service.retrieve_context(
             user_id=user_id,
             query=text,
-            top_k=min(3, settings.semantic_top_k),
+            top_k=min(5, settings.semantic_top_k),
             scopes=["user", "conversation", "project", "global"],
         )
     except Exception:
@@ -1994,6 +1973,13 @@ async def chat(
                 continuity_message,
                 "",
                 request.scope,
+            )
+        elif settings.enable_semantic_memory:
+            enqueue_ingest_message(
+                user_id=user_id,
+                message=continuity_message,
+                source_message_id="",
+                scope=request.scope,
             )
 
         chat_session.messages.append({
@@ -2297,6 +2283,53 @@ async def delete_semantic_memory(memory_id: str, x_user_id: str = Header(..., al
     return {"status": "deleted", "memory_id": memory_id}
 
 
+@app.post("/test-memory")
+async def test_memory(
+    payload: TestMemoryRequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        return JSONResponse(status_code=400, content={"error": "X-User-ID header is required"})
+
+    message = (payload.message or "").strip()
+    if not message:
+        return JSONResponse(status_code=400, content={"error": "message is required"})
+
+    service = get_semantic_memory_service()
+    memory = service.ingest_message(
+        user_id=user_id,
+        message=message,
+        source_message_id="test-memory",
+        scope=payload.scope or "user",
+    )
+
+    requested_importance = str(payload.importance or "").strip().lower()
+    if memory is not None and requested_importance in {"low", "medium", "high"}:
+        score_map = {"low": 0.35, "medium": 0.65, "high": 0.9}
+        memory.importance_score = score_map[requested_importance]
+        metadata = dict(memory.metadata or {})
+        metadata["importance"] = requested_importance
+        memory.metadata = metadata
+        service.store.upsert(memory)
+
+    rows, context = service.retrieve_context(
+        user_id=user_id,
+        query=(payload.query or message).strip(),
+        top_k=5,
+        scopes=["user", "project", "conversation", "global"],
+        importance_levels=[requested_importance] if requested_importance in {"low", "medium", "high"} else None,
+    )
+    return {
+        "status": "ok",
+        "stored": memory is not None,
+        "stored_memory_id": memory.id if memory is not None else None,
+        "retrieved_count": len(rows),
+        "retrieved": rows,
+        "context": context,
+    }
+
+
 @app.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
@@ -2367,6 +2400,8 @@ async def chat_agent(
     metrics.inc("llm_cost_usd_total", usage["cost_est_usd"])
     if settings.enable_background_tasks and settings.enable_semantic_memory:
         background_tasks.add_task(enqueue_ingest_message, user_id, message, "", "user")
+    elif settings.enable_semantic_memory:
+        enqueue_ingest_message(user_id=user_id, message=message, source_message_id="", scope="user")
     _record_usage_log(
         user_id=user_id,
         session_id=request.chat_id,

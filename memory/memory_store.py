@@ -13,7 +13,6 @@ from typing import Any, List, Optional
 
 from backend.app.embeddings.provider import get_embedding_provider
 from .memory_schema import Memory
-from backend.app.core.db.mongo import get_db
 
 MAX_VALUES_PER_KEY = int(os.getenv("MEMORY_MAX_VALUES_PER_KEY", "3"))
 
@@ -27,15 +26,6 @@ class MemoryStore:
         self._key_value_index: dict[tuple[str, str, str], str] = {}
         self._storage_path = Path(__file__).resolve().parent / "memories.json"
         self._embedder = None
-        mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
-        if mongo_enabled:
-            try:
-                self._db = get_db()
-                self._collection = self._db["memories"]
-            except Exception:
-                self._collection = None
-        else:
-            self._collection = None
         self._load()
 
     def _load(self):
@@ -43,36 +33,6 @@ class MemoryStore:
         self._key_index = {}
         self._key_value_index = {}
         dirty = False
-        if self._collection is not None:
-            try:
-                data = list(self._collection.find({}, {"_id": 0}))
-                if data:
-                    for item in data:
-                        if not isinstance(item, dict):
-                            continue
-                        try:
-                            memory = Memory.from_dict(item)
-                            if memory.confidence < 0.5:
-                                memory.confidence = 0.5
-                                dirty = True
-                            if self._backfill_metadata(memory):
-                                dirty = True
-                            if self._ensure_memory_features(memory):
-                                dirty = True
-                            if self._is_broad_rule(memory):
-                                capped = min(max(memory.confidence, 0.5), 0.55)
-                                if capped != memory.confidence:
-                                    memory.confidence = capped
-                                    dirty = True
-                            self._memories[memory.id] = memory
-                        except Exception:
-                            continue
-                    self._rebuild_index()
-                    if dirty:
-                        self._save()
-                    return
-            except Exception:
-                pass
         if not self._storage_path.exists():
             return
         try:
@@ -109,15 +69,6 @@ class MemoryStore:
             pass
 
     def _save(self):
-        if self._collection is not None:
-            try:
-                existing_ids = set(self._memories.keys())
-                for memory in self._memories.values():
-                    self._collection.replace_one({"id": memory.id}, memory.to_dict(), upsert=True)
-                self._collection.delete_many({"id": {"$nin": list(existing_ids)}})
-                return
-            except Exception:
-                pass
         try:
             payload = [m.to_dict() for m in self._memories.values()]
             with open(self._storage_path, "w", encoding="utf-8") as f:

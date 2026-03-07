@@ -39,6 +39,8 @@ FACT_PATTERNS = [
 ]
 TRANSIENT_TOKENS = {"today", "tomorrow", "this week", "right now", "currently"}
 SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.75"))
+SEMANTIC_DEDUP_THRESHOLD = float(os.getenv("SEMANTIC_DEDUP_THRESHOLD", "0.95"))
+SEMANTIC_DEFAULT_TOP_K = int(os.getenv("SEMANTIC_TOP_K", "5"))
 
 
 class SemanticMemoryService:
@@ -47,6 +49,17 @@ class SemanticMemoryService:
         self.runtime = get_runtime_config()
         self.embedder = get_embedding_provider()
         self.store = get_vector_store()
+
+    def _embed_texts(self, texts: list[str]):
+        """
+        Uses provider batch embeddings when available, with safe single-item fallback.
+        """
+        if not texts:
+            return []
+        embed_batch = getattr(self.embedder, "embed_batch", None)
+        if callable(embed_batch):
+            return embed_batch(texts)
+        return [self.embedder.embed(text) for text in texts]
 
     def classify_memory_type(self, message: str) -> str:
         text = (message or "").lower()
@@ -109,7 +122,7 @@ class SemanticMemoryService:
 
     def _existing_similarity_count(self, user_id: str, text: str) -> int:
         try:
-            query = self.embedder.embed(text)
+            query = self._embed_texts([text])[0]
             hits = self.store.search(query.vector, user_id=user_id, top_k=16, scopes=None)
             return len([h for h in hits if h.similarity >= 0.84 and h.memory.is_active and not h.memory.is_archived])
         except Exception:
@@ -137,6 +150,30 @@ class SemanticMemoryService:
         importance = self.score_importance(normalized, memory_type, previous_similar_count=similar_count)
         tags = self.extract_tags(normalized)
         decay_factor = self.settings.importance_decay_per_day
+        t0 = time.perf_counter()
+        embedding = self._embed_texts([normalized])[0]
+        metrics.observe("embedding_time_seconds", time.perf_counter() - t0)
+
+        # Deduplicate near-identical semantic memories before upsert.
+        duplicate = False
+        duplicate_score = 0.0
+        try:
+            duplicate, duplicate_score = self.store.has_duplicate(
+                query_vector=embedding.vector,
+                user_id=user_id,
+                threshold=SEMANTIC_DEDUP_THRESHOLD,
+            )
+        except Exception:
+            # Defensive fallback if backend does not expose duplicate helper.
+            pass
+        if duplicate:
+            log_event(
+                "semantic_memory_duplicate_skipped",
+                user_id=user_id,
+                similarity=round(float(duplicate_score), 4),
+                threshold=SEMANTIC_DEDUP_THRESHOLD,
+            )
+            return None
 
         memory = SemanticMemory.create(
             user_id=user_id,
@@ -150,16 +187,15 @@ class SemanticMemoryService:
         )
         memory.reinforcement_count = max(0, similar_count)
 
-        t0 = time.perf_counter()
-        embedding = self.embedder.embed(normalized)
-        metrics.observe("embedding_time_seconds", time.perf_counter() - t0)
         memory.embedding = embedding.vector
         memory.embedding_model = embedding.model
         memory.embedding_provider = embedding.provider
+        importance_label = "high" if importance >= 0.8 else "medium" if importance >= 0.55 else "low"
         memory.metadata = {
             "similar_count": similar_count,
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "importance_model": "base+reinforcement+emotion",
+            "importance": importance_label,
         }
         self.store.upsert(memory)
         log_event(
@@ -189,17 +225,24 @@ class SemanticMemoryService:
         query: str,
         top_k: Optional[int] = None,
         scopes: Optional[list[str]] = None,
+        importance_levels: Optional[list[str]] = None,
     ) -> tuple[list[dict], str]:
         if not self.settings.enable_semantic_memory:
             return [], ""
 
-        top_k = top_k or self.runtime.semantic_top_k
+        top_k = top_k or min(SEMANTIC_DEFAULT_TOP_K, self.runtime.semantic_top_k)
         t0 = time.perf_counter()
-        query_emb = self.embedder.embed(query)
+        query_emb = self._embed_texts([query])[0]
         metrics.observe("embedding_time_seconds", time.perf_counter() - t0)
 
         t1 = time.perf_counter()
-        hits = self.store.search(query_emb.vector, user_id=user_id, top_k=top_k * 4, scopes=scopes)
+        hits = self.store.search(
+            query_emb.vector,
+            user_id=user_id,
+            top_k=max(top_k * 4, top_k),
+            scopes=scopes,
+            importance_levels=importance_levels,
+        )
         metrics.observe("memory_retrieval_time_seconds", time.perf_counter() - t1)
 
         ranked = sorted(
@@ -239,6 +282,7 @@ class SemanticMemoryService:
                 "content": hit.memory.content,
                 "memory_type": hit.memory.memory_type,
                 "scope": hit.memory.scope,
+                "importance": ("high" if hit.memory.importance_score >= 0.8 else "medium" if hit.memory.importance_score >= 0.55 else "low"),
                 "importance_score": hit.memory.importance_score,
                 "similarity_score": hit.similarity,
                 "recency_weight": self._recency_weight(hit.memory.created_at),
@@ -311,9 +355,13 @@ class SemanticMemoryService:
             return {"compressed": 0}
 
         now = datetime.now(timezone.utc)
+        min_age_days = max(1, int(self.settings.semantic_compression_age_days))
         buckets: dict[tuple[str, str], list[SemanticMemory]] = defaultdict(list)
         for m in rows:
             if m.importance_score > self.runtime.memory_archive_threshold:
+                continue
+            age_days = (now - m.updated_at).total_seconds() / 86400.0
+            if age_days < float(min_age_days):
                 continue
             key = (m.memory_type, m.scope)
             buckets[key].append(m)

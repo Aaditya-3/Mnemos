@@ -1,19 +1,20 @@
 """
-Email/password authentication endpoints.
+Email/password authentication endpoints backed by the relational database.
 """
+
+from __future__ import annotations
 
 import hashlib
 import hmac
 import os
+import re
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from pymongo.errors import PyMongoError
 
 from backend.app.core.auth.jwt_auth import create_access_token
-from backend.app.core.db.mongo import get_db
+from backend.app.core.db.relational import DBUser, get_relational_session
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -40,7 +41,23 @@ class AuthResponse(BaseModel):
 
 
 def normalize_email(email: str) -> str:
-    return email.strip().lower()
+    return (email or "").strip().lower()
+
+
+def _username_from_email(email: str) -> str:
+    base = (email or "").split("@", 1)[0].strip().lower() or "user"
+    base = re.sub(r"[^a-z0-9._-]+", "_", base).strip("._-") or "user"
+    return base[:120]
+
+
+def _unique_username(db, base: str) -> str:
+    candidate = base
+    idx = 1
+    while db.query(DBUser.id).filter(DBUser.username == candidate).first():
+        suffix = f"_{idx}"
+        candidate = f"{base[: max(1, 120 - len(suffix))]}{suffix}"
+        idx += 1
+    return candidate
 
 
 def hash_password(password: str) -> str:
@@ -90,42 +107,24 @@ async def signup(payload: SignupRequest):
     email = normalize_email(payload.email)
     validate_auth_payload(email, payload.password)
 
-    try:
-        db = get_db()
-        users = db["users"]
-        existing = users.find_one({"email": email})
+    with get_relational_session() as db:
+        existing = db.query(DBUser).filter(DBUser.email == email).first()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Account already exists for this email",
             )
-
-        user_id = str(uuid.uuid4())
-        users.insert_one(
-            {
-                "_id": user_id,
-                "email": email,
-                "name": (payload.name or "").strip(),
-                "auth_provider": "local",
-                "password_hash": hash_password(payload.password),
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
+        user = DBUser(
+            id=str(uuid.uuid4()),
+            username=_unique_username(db, _username_from_email(email)),
+            email=email,
+            password_hash=hash_password(payload.password),
+            name=(payload.name or "").strip() or None,
+            plan_type="free",
+            is_active=True,
         )
-    except HTTPException:
-        raise
-    except PyMongoError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database unavailable. Please ensure MongoDB is running and try again.",
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Signup failed due to an internal error.",
-        )
-
-    token = create_access_token({"sub": user_id, "email": email})
+        db.add(user)
+        token = create_access_token({"sub": user.id, "email": email})
     return AuthResponse(access_token=token)
 
 
@@ -134,32 +133,17 @@ async def login(payload: LoginRequest):
     email = normalize_email(payload.email)
     validate_auth_payload(email, payload.password)
 
-    try:
-        db = get_db()
-        user = db["users"].find_one({"email": email})
-        if not user or not user.get("password_hash"):
+    with get_relational_session() as db:
+        user = db.query(DBUser).filter(DBUser.email == email).first()
+        if not user or not user.password_hash:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
-
-        if not verify_password(payload.password, user["password_hash"]):
+        if not verify_password(payload.password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
-    except HTTPException:
-        raise
-    except PyMongoError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database unavailable. Please ensure MongoDB is running and try again.",
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed due to an internal error.",
-        )
-
-    token = create_access_token({"sub": str(user["_id"]), "email": email})
+        token = create_access_token({"sub": str(user.id), "email": email})
     return AuthResponse(access_token=token)

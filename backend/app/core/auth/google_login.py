@@ -1,20 +1,20 @@
 """
-Google authentication endpoint.
-
-Frontend should obtain a Google ID token (e.g. via @react-oauth/google)
-and POST it to /auth/google. Backend verifies it with Google, upserts the
-user in MongoDB, and returns a JWT for authenticated access.
+Google authentication endpoint backed by the relational database.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Any, Dict
+import re
+import uuid
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from backend.app.core.db.mongo import get_db
 from backend.app.core.auth.jwt_auth import create_access_token
+from backend.app.core.db.relational import DBUser, get_relational_session
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -31,10 +31,13 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
 
 
-async def verify_google_id_token(id_token: str) -> Dict[str, Any]:
-    """
-    Verify Google ID token via Google's tokeninfo endpoint.
-    """
+def _username_from_email(email: str) -> str:
+    base = (email or "").split("@", 1)[0].strip().lower() or "user"
+    base = re.sub(r"[^a-z0-9._-]+", "_", base).strip("._-") or "user"
+    return base[:120]
+
+
+async def verify_google_id_token(id_token: str) -> dict[str, Any]:
     url = "https://oauth2.googleapis.com/tokeninfo"
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(url, params={"id_token": id_token})
@@ -44,7 +47,6 @@ async def verify_google_id_token(id_token: str) -> Dict[str, Any]:
             detail="Invalid Google ID token",
         )
     data = resp.json()
-    # Verify audience (client_id)
     aud = data.get("aud")
     if GOOGLE_CLIENT_ID and aud != GOOGLE_CLIENT_ID:
         raise HTTPException(
@@ -56,40 +58,35 @@ async def verify_google_id_token(id_token: str) -> Dict[str, Any]:
 
 @router.post("/google", response_model=AuthResponse)
 async def login_with_google(payload: GoogleLoginRequest):
-    """
-    Login endpoint for Google ID token.
-
-    - Verifies Google ID token with Google
-    - Upserts user in MongoDB using sub/email
-    - Returns JWT (access_token) for use with /chat and other endpoints
-    """
     token_info = await verify_google_id_token(payload.id_token)
 
-    email = token_info.get("email")
-    sub = token_info.get("sub")
-    if not email or not sub:
+    email = str(token_info.get("email") or "").strip().lower()
+    if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google token missing email or sub",
+            detail="Google token missing email",
         )
 
-    db = get_db()
-    users = db["users"]
+    with get_relational_session() as db:
+        user = db.query(DBUser).filter(DBUser.email == email).first()
+        if user is None:
+            username_base = _username_from_email(email)
+            username = username_base
+            idx = 1
+            while db.query(DBUser.id).filter(DBUser.username == username).first():
+                suffix = f"_{idx}"
+                username = f"{username_base[: max(1, 120 - len(suffix))]}{suffix}"
+                idx += 1
+            user = DBUser(
+                id=str(uuid.uuid4()),
+                username=username,
+                email=email,
+                password_hash="google_oauth",
+                name=str(token_info.get("name") or username),
+                plan_type="free",
+                is_active=True,
+            )
+            db.add(user)
 
-    # Upsert user by Google sub
-    normalized_email = str(email).strip().lower()
-    existing = users.find_one({"google_id": sub})
-    if existing:
-        user_id = existing["_id"]
-    else:
-        doc = {
-            "_id": sub,  # use Google sub as primary id
-            "email": normalized_email,
-            "google_id": sub,
-        }
-        users.insert_one(doc)
-        user_id = doc["_id"]
-
-    access_token = create_access_token({"sub": str(user_id), "email": normalized_email})
+        access_token = create_access_token({"sub": str(user.id), "email": email})
     return AuthResponse(access_token=access_token)
-
