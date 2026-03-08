@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from backend.app.core.config import get_settings
 from backend.app.memory.models import SemanticMemory
 from backend.app.observability.logging import log_event
 from memory.qdrant_memory import get_qdrant_memory_service
@@ -79,6 +80,37 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
         return self.backend.has_duplicate(query_vector=query_vector, user_id=user_id, threshold=threshold)
 
 
+class DisabledVectorStoreRepository(VectorStoreRepository):
+    """
+    No-op vector store used when Qdrant is optional and currently unavailable.
+    """
+
+    def __init__(self, reason: str = "qdrant_unavailable"):
+        self.reason = reason
+
+    def upsert(self, memory: SemanticMemory):
+        return None
+
+    def search(
+        self,
+        vector: list[float],
+        user_id: str,
+        top_k: int,
+        scopes: Optional[list[str]] = None,
+        importance_levels: Optional[list[str]] = None,
+    ) -> list[VectorHit]:
+        return []
+
+    def list_user_memories(self, user_id: str) -> list[SemanticMemory]:
+        return []
+
+    def delete_memory(self, user_id: str, memory_id: str) -> bool:
+        return False
+
+    def has_duplicate(self, query_vector: list[float], user_id: str, threshold: float = 0.95) -> tuple[bool, float]:
+        return False, 0.0
+
+
 def iter_memory_tokens(text: str) -> Iterable[str]:
     for token in (text or "").lower().replace("\n", " ").split():
         t = token.strip(".,!?;:\"'()[]{}")
@@ -94,9 +126,14 @@ def get_vector_store() -> VectorStoreRepository:
     if _repo_cache is not None:
         return _repo_cache
 
-    repo = QdrantVectorStoreRepository()
-    if repo.client is None:
-        raise RuntimeError("Qdrant is unavailable. Set QDRANT_URL and QDRANT_API_KEY.")
-    log_event("vector_store_ready", backend="qdrant", collection=repo.collection)
+    settings = get_settings()
+    repo: VectorStoreRepository = QdrantVectorStoreRepository()
+    if isinstance(repo, QdrantVectorStoreRepository) and repo.client is None:
+        if settings.require_qdrant:
+            raise RuntimeError("Qdrant is unavailable. Set QDRANT_URL and QDRANT_API_KEY.")
+        repo = DisabledVectorStoreRepository(reason="qdrant_unavailable_optional")
+        log_event("vector_store_disabled", backend="qdrant", reason="unavailable_optional")
+    else:
+        log_event("vector_store_ready", backend="qdrant", collection=getattr(repo, "collection", ""))
     _repo_cache = repo
     return _repo_cache

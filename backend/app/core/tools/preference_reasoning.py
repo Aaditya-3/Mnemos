@@ -38,12 +38,12 @@ def parse_preference_query(user_message: str) -> tuple[str, str, str]:
         return "", "", ""
 
     patterns = [
-        r"(?:which|what)\s+(?:is|s)\s+my\s+(?:fav(?:ou)?rite|fav)\s+([a-z0-9' \-]+?)\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
-        r"my\s+(?:fav(?:ou)?rite|fav)\s+([a-z0-9' \-]+?)\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
+        r"(?:which|what)\s+(?:is|s)\s+my\s+(?:favou?rite|fav)\s+([a-z0-9' \-]+?)\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
+        r"my\s+(?:favou?rite|fav)\s+([a-z0-9' \-]+?)\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
         r"which\s+([a-z0-9' \-]+?)\s+do\s+i\s+like\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
         r"what\s+([a-z0-9' \-]+?)\s+do\s+i\s+like\s+(?:in|from|of)\s+([a-z0-9' \-]+)",
-        r"(?:which|what)\s+(?:is|s)\s+my\s+(?:fav(?:ou)?rite|fav)\s+([a-z0-9' \-]+)",
-        r"my\s+(?:fav(?:ou)?rite|fav)\s+([a-z0-9' \-]+)",
+        r"(?:which|what)\s+(?:is|s)\s+my\s+(?:favou?rite|fav)\s+([a-z0-9' \-]+)",
+        r"my\s+(?:favou?rite|fav)\s+([a-z0-9' \-]+)",
         r"which\s+([a-z0-9' \-]+?)\s+do\s+i\s+like",
         r"what\s+([a-z0-9' \-]+?)\s+do\s+i\s+like",
     ]

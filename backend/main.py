@@ -108,7 +108,7 @@ SHORT_STANDALONE_MESSAGES = {
 MEMORY_QUERY_PATTERNS = [
     r"\bwhat(?:'s| is)\s+my\b",
     r"\bwhen\s+(?:is|was)\s+my\b",
-    r"\bmy\s+(?:fav(?:ou)?rite|fav)\b",
+    r"\bmy\s+(?:favou?rite|fav)\b",
     r"\bwhat\s+do\s+i\s+like\b",
     r"\bdo\s+you\s+remember\b",
     r"\bmy\s+preferences?\b",
@@ -191,6 +191,10 @@ def _is_standalone_short_message(message: str) -> bool:
 def _is_context_dependent_message(message: str) -> bool:
     text = (message or "").strip()
     if not text or _is_standalone_short_message(text):
+        return False
+    lower = text.lower()
+    # Explicit self-contained memory lookup queries should not be mixed with recent context.
+    if re.search(r"\bwhat(?:'s|s| is)\s+my\b", lower) or re.search(r"\bwhen\s+(?:is|was)\s+my\b", lower):
         return False
     if _is_short_message(text):
         return True
@@ -1641,15 +1645,130 @@ def _memory_line_to_statement(memory_line: str) -> str:
     return f"{key_text} is {value_text}"
 
 
+def _interpret_memory_query_type(query: str) -> tuple[str, str]:
+    """
+    Brain-like interpretation for memory lookup intent.
+    Returns (kind, slot):
+    - ("identity", "name|college|year")
+    - ("preference", "<subject_key>")
+    - ("event", "")
+    - ("generic", "")
+    - ("other", "")
+    """
+    text = (query or "").strip().lower()
+    if not text:
+        return "other", ""
+
+    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+name\b", text) or re.search(r"\bwho\s+am\s+i\b", text):
+        return "identity", "name"
+    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+(?:college|university)\b", text):
+        return "identity", "college"
+    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+(?:year|graduation year|year of graduation)\b", text):
+        return "identity", "year"
+    if re.search(r"\bwhen\s+(?:is|was)\s+my\b", text):
+        return "event", ""
+
+    subject_key, _, _ = parse_preference_query(text)
+    if subject_key:
+        return "preference", subject_key
+
+    if _is_memory_lookup_request(text):
+        return "generic", ""
+    return "other", ""
+
+
+def _requested_profile_slot(query: str) -> str:
+    kind, slot = _interpret_memory_query_type(query)
+    if kind == "identity":
+        return slot
+    return ""
+
+
+def _memory_matches_profile_slot(memory: Any, slot: str) -> bool:
+    key_l = str(getattr(memory, "key", "") or "").strip().lower()
+    mem_type = str(getattr(memory, "type", "") or "").strip().lower()
+    md = getattr(memory, "metadata", {}) or {}
+    category = str(md.get("category") or "").strip().lower() if isinstance(md, dict) else ""
+    domain = str(md.get("domain") or "").strip().lower() if isinstance(md, dict) else ""
+    if slot == "name":
+        if key_l in {"core_identity.name", "name", "custom.name"}:
+            return True
+        if domain == "identity" and category == "name":
+            return True
+        if mem_type == "fact" and "name" in key_l and not any(
+            bad in key_l for bad in {"company", "project", "anime", "character", "drink", "food"}
+        ):
+            return True
+    if slot == "college":
+        if key_l in {"core_identity.college", "college", "university", "custom.college"}:
+            return True
+        if domain == "identity" and category in {"college", "university"}:
+            return True
+        if mem_type == "fact" and any(x in key_l for x in {"college", "university"}):
+            return True
+    if slot == "year":
+        if key_l in {"core_identity.year", "year", "graduation_year", "custom.year"}:
+            return True
+        if domain == "identity" and category in {"year", "graduation_year"}:
+            return True
+        if mem_type == "fact" and any(x in key_l for x in {"year", "graduation"}):
+            return True
+    return False
+
+
+def _resolve_profile_fact_query(user_id: str, user_message: str) -> Optional[str]:
+    slot = _requested_profile_slot(user_message)
+    if not slot:
+        return None
+
+    store = get_memory_store()
+    memories = [
+        m
+        for m in store.get_memories_by_confidence(user_id=user_id, min_confidence=0.5)
+        if str(getattr(m, "value", "") or "").strip() and _memory_matches_profile_slot(m, slot)
+    ]
+    memories.sort(key=lambda m: (float(getattr(m, "confidence", 0.0)), m.last_updated.timestamp()), reverse=True)
+
+    slot_label = {"name": "name", "college": "college", "year": "year"}.get(slot, slot.replace("_", " "))
+    if slot == "name":
+        if not memories:
+            return "I don't have your name stored yet."
+        value = re.sub(r"\s+", " ", str(memories[0].value or "").strip())
+        if not value:
+            return "I don't have your name stored yet."
+        return f"Your name is {value}."
+    if slot in {"college", "year"}:
+        if not memories:
+            return f"I don't have your {slot_label} stored yet."
+        value = re.sub(r"\s+", " ", str(memories[0].value or "").strip())
+        if not value:
+            return f"I don't have your {slot_label} stored yet."
+        return f"Your {slot_label} is {value}."
+    return None
+
+
 def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Optional[str]:
     query = (user_message or "").strip()
     if not query:
         return None
 
+    query_kind, query_slot = _interpret_memory_query_type(query)
+
+    # Strict profile-fact path: avoid cross-category leakage (e.g., name query -> drink memory).
+    profile_fact_reply = _resolve_profile_fact_query(user_id=user_id, user_message=query)
+    if profile_fact_reply:
+        return profile_fact_reply
+
+    # For explicit identity queries, avoid generic fallbacks from other categories.
+    if query_kind == "identity":
+        slot_label = {"name": "name", "college": "college", "year": "year"}.get(query_slot, "profile information")
+        return f"I don't have your {slot_label} stored yet."
+
     # Strongest deterministic path: explicit preference resolver.
-    preference_reply = handle_preference_query(query, user_id)
-    if preference_reply:
-        return preference_reply
+    if query_kind in {"preference", "generic"}:
+        preference_reply = handle_preference_query(query, user_id)
+        if preference_reply:
+            return preference_reply
 
     memory_lines = retrieve_memories(query, user_id)
     if memory_lines:

@@ -13,7 +13,7 @@
     },
     "created_at": "2026-02-10T16:12:52.326071",
     "last_updated": "2026-02-10T16:12:52.326071",
-    "memory_type": "food_preference",
+    "memory_type": "preference_food",
     "embedding": [],
     "importance_score": 0.7
   },
@@ -31,7 +31,7 @@
     },
     "created_at": "2026-02-10T16:32:59.733383",
     "last_updated": "2026-02-10T16:32:59.733383",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [],
     "importance_score": 0.7
   },
@@ -49,7 +49,7 @@
     },
     "created_at": "2026-02-10T19:01:05.016310",
     "last_updated": "2026-02-10T19:01:05.016310",
-    "memory_type": "food_preference",
+    "memory_type": "preference_food",
     "embedding": [
       -0.0007399178068384195,
       0.08479880828041808,
@@ -454,7 +454,7 @@
     },
     "created_at": "2026-02-10T19:01:05.024400",
     "last_updated": "2026-02-10T22:22:46.446338",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [
       0.06600958491311126,
       0.07590092544966111,
@@ -2469,7 +2469,7 @@
     },
     "created_at": "2026-02-10T19:10:13.347096",
     "last_updated": "2026-02-10T22:19:21.711471",
-    "memory_type": "drink_preference",
+    "memory_type": "preference_drink",
     "embedding": [
       0.08642241349725242,
       -0.044488428476833396,
@@ -2874,7 +2874,7 @@
     },
     "created_at": "2026-02-10T22:21:18.173967",
     "last_updated": "2026-02-10T22:21:18.173967",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [
       -0.0034292474959360204,
       0.06926676258101537,
@@ -3277,7 +3277,7 @@
     },
     "created_at": "2026-02-10T23:04:08.147765",
     "last_updated": "2026-02-11T01:07:06.786274",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [
       0.02513670828118895,
       0.004876677065131942,
@@ -3676,7 +3676,7 @@
     "metadata": null,
     "created_at": "2026-02-10T23:04:27.776916",
     "last_updated": "2026-02-14T18:50:11.429611",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [
       0.04381546958674616,
       0.05781734184431003,
@@ -4889,7 +4889,7 @@
     },
     "created_at": "2026-02-11T19:10:54.091812",
     "last_updated": "2026-02-11T19:10:54.091812",
-    "memory_type": "food_preference",
+    "memory_type": "preference_food",
     "embedding": [],
     "importance_score": 0.8
   },
@@ -4907,7 +4907,7 @@
     },
     "created_at": "2026-02-14T18:51:59.409587",
     "last_updated": "2026-02-14T18:51:59.409587",
-    "memory_type": "favorite_anime",
+    "memory_type": "preference_anime",
     "embedding": [
       0.0819757730069353,
       0.023426485368820124,
