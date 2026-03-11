@@ -393,6 +393,8 @@ def _apply_response_polish(user_message: str, reply: str) -> str:
     if not text:
         return text
 
+    memory_lookup = _is_memory_lookup_request(user_message)
+    reply_word_count = len(_word_tokens(text))
     if len(_word_tokens(text)) < RESPONSE_SHORT_WORD_THRESHOLD:
         text = _warm_short_response(text)
 
@@ -406,7 +408,7 @@ def _apply_response_polish(user_message: str, reply: str) -> str:
     if len(sentences) < RESPONSE_MIN_SENTENCES:
         if _is_unknown_info_reply(text):
             sentences.append("If you want, tell me now and I'll remember it.")
-        elif not _is_clear_greeting(user_message):
+        elif not _is_clear_greeting(user_message) and not memory_lookup and reply_word_count >= 5:
             sentences.append("Hope that helps.")
 
     should_add_hook = (
@@ -414,6 +416,7 @@ def _apply_response_polish(user_message: str, reply: str) -> str:
         and "?" not in " ".join(sentences)
         and ("?" in (user_message or "") or _is_memory_lookup_request(user_message))
         and not _is_clear_greeting(user_message)
+        and not memory_lookup
         and not _is_unknown_info_reply(" ".join(sentences))
     )
     if should_add_hook:
@@ -1572,7 +1575,20 @@ def handle_preference_query(user_message: str, user_id: str) -> Optional[str]:
         return None
 
     store = get_memory_store()
-    user_memories = [m for m in store.get_user_memories(user_id) if m.confidence >= 0.5]
+    def _memory_ts(memory: Any) -> float:
+        raw = getattr(memory, "last_updated", None)
+        try:
+            if raw is not None:
+                return float(raw.timestamp())
+        except Exception:
+            return 0.0
+        return 0.0
+
+    user_memories = sorted(
+        [m for m in store.get_user_memories(user_id) if m.confidence >= 0.5],
+        key=lambda m: (float(getattr(m, "confidence", 0.0) or 0.0), _memory_ts(m)),
+        reverse=True,
+    )
 
     specific_values: list[str] = []
     global_values: list[str] = []
@@ -1753,6 +1769,7 @@ def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Opti
         return None
 
     query_kind, query_slot = _interpret_memory_query_type(query)
+    preference_subject_key, _, _ = parse_preference_query(query)
 
     # Strict profile-fact path: avoid cross-category leakage (e.g., name query -> drink memory).
     profile_fact_reply = _resolve_profile_fact_query(user_id=user_id, user_message=query)
@@ -1769,6 +1786,10 @@ def _resolve_deterministic_memory_reply(user_id: str, user_message: str) -> Opti
         preference_reply = handle_preference_query(query, user_id)
         if preference_reply:
             return preference_reply
+        # Explicit subject preference lookups should not leak unrelated categories
+        # from broad memory retrieval.
+        if query_kind == "preference" and preference_subject_key:
+            return None
 
     memory_lines = retrieve_memories(query, user_id)
     if memory_lines:

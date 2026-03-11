@@ -26,14 +26,36 @@ _MEMORY_UPDATE_PATTERNS = [
     r"\bi\s+hate\b",
     r"\bmy\s+\w+\s+(?:is|was|will\s+be|on)\b",
     r"\bi\s+have\b",
-    r"\bi\s+am\b",
-    r"\bi'm\b",
 ]
 _GUESS_PATTERNS = [
     r"\bguess\b",
     r"\bwhat\s+would\s+i\s+like\b",
     r"\bguess\s+my\b",
 ]
+
+_TRAIT_STYLE_RE = re.compile(r"\bi(?:\s+am|'m)\s+(.+)$", re.I)
+_TRANSIENT_LEAD_RE = re.compile(r"^[a-z]+ing\b", re.I)
+
+
+def _looks_like_trait_update(text: str) -> bool:
+    """
+    Accept stable self-descriptions while avoiding transient clarification phrases
+    such as "I'm asking about ...".
+    """
+    m = _TRAIT_STYLE_RE.search((text or "").strip())
+    if not m:
+        return False
+    phrase = (m.group(1) or "").strip(" .?!,")
+    if not phrase:
+        return False
+    tokens = re.findall(r"[a-z0-9']+", phrase.lower())
+    if not tokens or len(tokens) > 8:
+        return False
+    if _TRANSIENT_LEAD_RE.match(tokens[0] or ""):
+        return False
+    if {"asking", "question", "clarifying"}.intersection(tokens):
+        return False
+    return True
 
 
 def classify_intent(message: str) -> Intent:
@@ -49,6 +71,8 @@ def classify_intent(message: str) -> Intent:
     if any(re.search(p, lowered) for p in _MEMORY_QUERY_PATTERNS):
         return Intent.MEMORY_QUERY
     if any(re.search(p, lowered) for p in _MEMORY_UPDATE_PATTERNS):
+        return Intent.MEMORY_UPDATE
+    if _looks_like_trait_update(lowered):
         return Intent.MEMORY_UPDATE
     if "?" in lowered:
         return Intent.FACTUAL_QUESTION
