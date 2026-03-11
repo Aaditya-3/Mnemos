@@ -3,51 +3,51 @@
 @tailwind utilities;
 
 :root {
-  --base-1-rgb: 34 40 49;     /* #222831 */
-  --base-2-rgb: 57 62 70;     /* #393E46 */
-  --base-3-rgb: 148 137 121;  /* #948979 */
-  --base-4-rgb: 223 208 184;  /* #DFD0B8 */
+  --base-1-rgb: 17 17 17;     /* #111111 */
+  --base-2-rgb: 31 31 31;     /* #1F1F1F */
+  --base-3-rgb: 141 129 112;  /* #8D8170 */
+  --base-4-rgb: 237 232 224;  /* #EDE8E0 */
 }
 
 :root[data-theme="dark"],
 :root:not([data-theme]) {
   color-scheme: dark;
   --bg-rgb: var(--base-1-rgb);
-  --bg-alt-rgb: 41 48 58;
+  --bg-alt-rgb: 25 25 25;
   --panel-rgb: var(--base-2-rgb);
-  --panel-2-rgb: 49 54 62;
-  --panel-deep-rgb: 38 44 53;
+  --panel-2-rgb: 43 43 43;
+  --panel-deep-rgb: 23 23 23;
   --accent-rgb: var(--base-3-rgb);
-  --accent-soft-rgb: var(--base-4-rgb);
+  --accent-soft-rgb: 191 176 154;
   --text-rgb: var(--base-4-rgb);
-  --text-muted-rgb: 184 171 150;
-  --on-accent-rgb: var(--base-1-rgb);
-  --border-rgb: var(--base-3-rgb);
+  --text-muted-rgb: 171 162 148;
+  --on-accent-rgb: 24 22 20;
+  --border-rgb: 124 113 97;
   --glow-a-rgb: var(--base-3-rgb);
-  --glow-b-rgb: var(--base-4-rgb);
-  --overlay-rgb: 16 21 29;
-  --surface-border-rgb: var(--base-3-rgb);
+  --glow-b-rgb: 175 163 145;
+  --overlay-rgb: 8 8 8;
+  --surface-border-rgb: 127 116 100;
   --shadow-rgb: var(--overlay-rgb);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-rgb: var(--base-4-rgb);
-  --bg-alt-rgb: 239 227 206;
-  --panel-rgb: 248 239 225;
-  --panel-2-rgb: 232 215 188;
-  --panel-deep-rgb: 216 197 168;
-  --accent-rgb: var(--base-3-rgb);
-  --accent-soft-rgb: var(--base-2-rgb);
-  --text-rgb: var(--base-1-rgb);
-  --text-muted-rgb: var(--base-2-rgb);
-  --on-accent-rgb: var(--base-1-rgb);
-  --border-rgb: var(--base-2-rgb);
-  --glow-a-rgb: var(--base-2-rgb);
-  --glow-b-rgb: var(--base-3-rgb);
-  --overlay-rgb: var(--base-1-rgb);
-  --surface-border-rgb: var(--base-2-rgb);
-  --shadow-rgb: var(--base-1-rgb);
+  --bg-rgb: 250 247 242;
+  --bg-alt-rgb: 242 236 227;
+  --panel-rgb: 255 252 248;
+  --panel-2-rgb: 247 241 232;
+  --panel-deep-rgb: 236 228 217;
+  --accent-rgb: 117 102 84;
+  --accent-soft-rgb: 152 136 117;
+  --text-rgb: 35 32 28;
+  --text-muted-rgb: 104 95 83;
+  --on-accent-rgb: 252 249 244;
+  --border-rgb: 169 155 136;
+  --glow-a-rgb: 188 174 155;
+  --glow-b-rgb: 226 214 198;
+  --overlay-rgb: 25 20 16;
+  --surface-border-rgb: 171 157 138;
+  --shadow-rgb: var(--overlay-rgb);
 }
 
 html,
