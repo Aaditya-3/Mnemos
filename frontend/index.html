@@ -48,6 +48,8 @@
             --glow-a-rgb: var(--base-3-rgb);
             --glow-b-rgb: var(--base-4-rgb);
             --overlay-rgb: 16 21 29;
+            --surface-border-rgb: var(--base-3-rgb);
+            --shadow-rgb: var(--overlay-rgb);
         }
 
         :root[data-theme="light"] {
@@ -66,17 +68,35 @@
             --glow-a-rgb: var(--base-2-rgb);
             --glow-b-rgb: var(--base-3-rgb);
             --overlay-rgb: var(--base-1-rgb);
+            --surface-border-rgb: var(--base-2-rgb);
+            --shadow-rgb: var(--base-1-rgb);
         }
 
         html, body {
             scroll-behavior: smooth;
             background:
+                linear-gradient(145deg, rgb(var(--bg-rgb)) 0%, rgb(var(--bg-alt-rgb)) 100%),
                 radial-gradient(circle at 8% 8%, rgb(var(--glow-b-rgb) / 0.16), transparent 42%),
                 radial-gradient(circle at 92% 12%, rgb(var(--glow-a-rgb) / 0.16), transparent 40%),
                 rgb(var(--bg-rgb));
             color: rgb(var(--text-rgb));
             font-family: "Manrope", sans-serif;
             transition: background 320ms ease, color 240ms ease;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image: linear-gradient(
+                to bottom,
+                rgb(var(--surface-border-rgb) / 0.06) 1px,
+                transparent 1px
+            );
+            background-size: 100% 26px;
+            mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+            opacity: 0.45;
         }
 
         @keyframes fadeUp {
@@ -170,6 +190,6 @@
 </head>
 <body>
     <div id="root"></div>
-    <script type="text/babel" src="app.jsx?v=20260311a"></script>
+    <script type="text/babel" src="app.jsx?v=20260311b"></script>
 </body>
 </html>

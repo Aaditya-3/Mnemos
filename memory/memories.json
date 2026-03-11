@@ -4899,14 +4899,14 @@
     "type": "preference",
     "key": "entertainment.anime",
     "value": "mc of animes",
-    "confidence": 0.8,
+    "confidence": 0.9,
     "metadata": {
       "domain": "entertainment",
       "category": "anime",
       "scope": "GLOBAL_SCOPE"
     },
     "created_at": "2026-02-14T18:51:59.409587",
-    "last_updated": "2026-02-14T18:51:59.409587",
+    "last_updated": "2026-03-11T13:01:16.414501",
     "memory_type": "preference_anime",
     "embedding": [
       0.0819757730069353,

@@ -36,15 +36,18 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error, theme, onTheme
     };
 
     return (
-        <div className="min-h-screen bg-[rgb(var(--bg-rgb))] text-[rgb(var(--text-rgb))] flex items-center justify-center px-4">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgb(var(--glow-a-rgb)/0.18),transparent_45%),radial-gradient(circle_at_85%_10%,rgb(var(--glow-b-rgb)/0.12),transparent_35%)]" />
-            <div className="relative w-full max-w-md bg-[rgb(var(--panel-rgb)/0.9)] border border-[rgb(var(--border-rgb)/0.45)] rounded-3xl p-7 shadow-[0_24px_84px_rgb(var(--overlay-rgb)/0.48)] backdrop-blur">
+        <div className="min-h-screen bg-[rgb(var(--bg-rgb))] text-[rgb(var(--text-rgb))] flex items-center justify-center px-4 py-8">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgb(var(--glow-a-rgb)/0.22),transparent_45%),radial-gradient(circle_at_85%_10%,rgb(var(--glow-b-rgb)/0.16),transparent_35%)]" />
+            <div className="relative w-full max-w-md rounded-[28px] border border-[rgb(var(--surface-border-rgb)/0.4)] bg-[linear-gradient(160deg,rgb(var(--panel-rgb)/0.95),rgb(var(--panel-2-rgb)/0.86))] p-7 shadow-[0_26px_70px_rgb(var(--shadow-rgb)/0.32)] backdrop-blur-xl">
                 <div className="flex items-center justify-between gap-4">
-                    <h1 className="text-2xl font-bold tracking-tight text-[rgb(var(--text-rgb))]">Mnemos</h1>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[rgb(var(--accent-rgb))]">Memory Chat</p>
+                        <h1 className="text-[1.7rem] font-bold tracking-tight text-[rgb(var(--text-rgb))]">Mnemos</h1>
+                    </div>
                     <button
                         type="button"
                         onClick={onThemeToggle}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border-rgb)/0.45)] bg-[rgb(var(--bg-alt-rgb))] px-2.5 py-1.5 text-xs font-semibold text-[rgb(var(--text-rgb))] transition-colors hover:bg-[rgb(var(--panel-2-rgb))]"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-[rgb(var(--surface-border-rgb)/0.45)] bg-[rgb(var(--bg-alt-rgb)/0.82)] px-2.5 py-1.5 text-xs font-semibold text-[rgb(var(--text-rgb))] transition-colors hover:bg-[rgb(var(--panel-2-rgb))]"
                     >
                         {theme === "dark" ? "Light" : "Dark"}
                     </button>
@@ -52,7 +55,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error, theme, onTheme
                 <p className="text-[rgb(var(--text-muted-rgb))] text-sm mt-2 mb-5">
                     {mode === "login" ? "Sign in to continue" : "Create your account"}
                 </p>
-                <div className="grid grid-cols-2 gap-2 mb-5 bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--border-rgb)/0.4)] p-1 rounded-xl">
+                <div className="grid grid-cols-2 gap-2 mb-5 bg-[rgb(var(--bg-alt-rgb)/0.74)] border border-[rgb(var(--surface-border-rgb)/0.32)] p-1 rounded-2xl">
                     <button
                         type="button"
                         onClick={() => setMode("login")}
@@ -83,7 +86,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error, theme, onTheme
                         placeholder="Username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="w-full bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--border-rgb)/0.45)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--text-muted-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.75)]"
+                        className="w-full bg-[rgb(var(--bg-alt-rgb)/0.78)] border border-[rgb(var(--surface-border-rgb)/0.38)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--text-muted-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.55)]"
                     />
                     <input
                         type="password"
@@ -91,7 +94,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error, theme, onTheme
                         placeholder="Password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--border-rgb)/0.45)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--text-muted-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.75)]"
+                        className="w-full bg-[rgb(var(--bg-alt-rgb)/0.78)] border border-[rgb(var(--surface-border-rgb)/0.38)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--text-muted-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.55)]"
                     />
                     {error && (
                         <div className="text-sm text-red-200 bg-red-950/40 border border-red-900 rounded-xl px-3 py-2">
@@ -101,7 +104,7 @@ function LoginScreen({ mode, setMode, onSubmit, isLoading, error, theme, onTheme
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-[rgb(var(--accent-rgb))] hover:bg-[rgb(var(--accent-soft-rgb))] disabled:bg-[rgb(var(--panel-rgb))] disabled:text-[rgb(var(--text-muted-rgb))] text-[rgb(var(--on-accent-rgb))] font-semibold py-3 rounded-xl transition-colors"
+                        className="w-full bg-[linear-gradient(135deg,rgb(var(--accent-rgb)),rgb(var(--accent-soft-rgb)))] hover:brightness-105 disabled:bg-[rgb(var(--panel-rgb))] disabled:text-[rgb(var(--text-muted-rgb))] text-[rgb(var(--on-accent-rgb))] font-semibold py-3 rounded-xl transition-all duration-200 shadow-[0_10px_24px_rgb(var(--shadow-rgb)/0.2)]"
                     >
                         {isLoading ? "Please wait..." : mode === "login" ? "Login" : "Signup"}
                     </button>
@@ -604,14 +607,14 @@ function App() {
     }
 
     return (
-        <div className="flex h-screen bg-[rgb(var(--bg-alt-rgb))] text-[rgb(var(--text-rgb))]">
+        <div className="relative flex h-screen gap-3 p-3 md:gap-4 md:p-4 bg-[rgb(var(--bg-alt-rgb))] text-[rgb(var(--text-rgb))]">
             <div className="fixed inset-0 bg-[radial-gradient(circle_at_0%_0%,rgb(var(--glow-b-rgb)/0.14),transparent_38%),radial-gradient(circle_at_100%_100%,rgb(var(--glow-a-rgb)/0.24),transparent_42%)] pointer-events-none" />
 
-            <div className={`${sidebarOpen ? "w-72" : "w-0"} relative transition-all duration-500 ease-in-out overflow-hidden bg-[rgb(var(--panel-rgb)/0.95)] border-r border-[rgb(var(--accent-rgb)/0.45)] flex flex-col`}>
-                <div className="p-4 border-b border-[rgb(var(--accent-rgb)/0.35)]">
+            <div className={`${sidebarOpen ? "w-72 border border-[rgb(var(--surface-border-rgb)/0.34)]" : "w-0 border-0"} relative z-10 transition-all duration-500 ease-in-out overflow-hidden bg-[rgb(var(--panel-rgb)/0.82)] rounded-2xl shadow-[0_16px_34px_rgb(var(--shadow-rgb)/0.22)] backdrop-blur-xl flex flex-col`}>
+                <div className="p-4 border-b border-[rgb(var(--surface-border-rgb)/0.3)]">
                     <button
                         onClick={createNewChat}
-                        className="w-full bg-[rgb(var(--text-rgb))] hover:bg-[rgb(var(--accent-soft-rgb))] active:scale-[0.99] text-[rgb(var(--bg-alt-rgb))] font-semibold py-2.5 px-4 rounded-xl transition-all duration-200 ease-out flex items-center justify-center gap-2"
+                        className="w-full bg-[linear-gradient(135deg,rgb(var(--accent-rgb)),rgb(var(--accent-soft-rgb)))] hover:brightness-105 active:scale-[0.99] text-[rgb(var(--on-accent-rgb))] font-semibold py-2.5 px-4 rounded-xl transition-all duration-200 ease-out flex items-center justify-center gap-2 shadow-[0_10px_20px_rgb(var(--shadow-rgb)/0.16)]"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -619,7 +622,7 @@ function App() {
                         New Chat
                     </button>
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-2.5">
                     {chats.length === 0 ? (
                         <div className="text-[rgb(var(--accent-rgb))] text-sm text-center mt-4">No chats yet. Start a new conversation.</div>
                     ) : (
@@ -628,15 +631,15 @@ function App() {
                                 key={chat.id}
                                 className={`group p-3 mb-2 rounded-xl cursor-pointer transition-all duration-250 ease-out transform-gpu ${
                                     currentChatId === chat.id
-                                        ? "bg-[rgb(var(--text-rgb))] text-[rgb(var(--bg-alt-rgb))] shadow-md ring-1 ring-[rgb(var(--text-rgb)/0.5)] scale-[1.01]"
-                                        : "bg-[rgb(var(--bg-alt-rgb)/0.8)] hover:bg-[rgb(var(--bg-alt-rgb))] hover:-translate-y-[1px] text-[rgb(var(--text-rgb))] border border-[rgb(var(--accent-rgb)/0.35)]"
+                                        ? "bg-[rgb(var(--accent-rgb)/0.26)] text-[rgb(var(--text-rgb))] border border-[rgb(var(--accent-rgb)/0.58)] shadow-[0_10px_22px_rgb(var(--shadow-rgb)/0.16)] scale-[1.01]"
+                                        : "bg-[rgb(var(--bg-alt-rgb)/0.72)] hover:bg-[rgb(var(--panel-2-rgb)/0.78)] hover:-translate-y-[1px] text-[rgb(var(--text-rgb))] border border-[rgb(var(--surface-border-rgb)/0.26)]"
                                 }`}
                                 onClick={() => setCurrentChatId(chat.id)}
                             >
                                 <div className="flex items-start justify-between">
                                     <div className="flex-1 min-w-0">
                                         <div className="font-medium truncate">{chat.title}</div>
-                                        <div className={`text-xs mt-1 ${currentChatId === chat.id ? "text-[rgb(var(--panel-rgb))]" : "text-[rgb(var(--accent-rgb))]"}`}>
+                                        <div className="text-xs mt-1 text-[rgb(var(--text-muted-rgb))]">
                                             Created: {formatDateTime(chat.created_at)}
                                         </div>
                                     </div>
@@ -647,7 +650,7 @@ function App() {
                                         }}
                                         className={`ml-2 transition-all duration-200 ease-out ${
                                             currentChatId === chat.id
-                                                ? "text-[rgb(var(--panel-rgb))] hover:text-red-700"
+                                                ? "text-[rgb(var(--text-rgb)/0.86)] hover:text-red-700"
                                                 : "text-[rgb(var(--accent-rgb))] hover:text-red-400"
                                         } ${
                                             "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0"
@@ -664,43 +667,48 @@ function App() {
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col relative">
-                <div className="bg-[rgb(var(--panel-rgb)/0.92)] border-b border-[rgb(var(--accent-rgb)/0.35)] p-4 flex items-center justify-between backdrop-blur">
-                    <div className="flex items-center gap-4">
-                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-[rgb(var(--accent-rgb))] hover:text-[rgb(var(--text-rgb))] transition-colors duration-200">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="z-10 flex-1 flex flex-col relative rounded-2xl overflow-hidden border border-[rgb(var(--surface-border-rgb)/0.28)] bg-[rgb(var(--panel-rgb)/0.72)] shadow-[0_20px_42px_rgb(var(--shadow-rgb)/0.2)] backdrop-blur-xl">
+                <div className="bg-[rgb(var(--panel-rgb)/0.9)] border-b border-[rgb(var(--surface-border-rgb)/0.3)] px-4 py-3 md:px-5 md:py-4 flex items-center justify-between backdrop-blur">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[rgb(var(--surface-border-rgb)/0.36)] bg-[rgb(var(--bg-alt-rgb)/0.78)] text-[rgb(var(--accent-rgb))] hover:text-[rgb(var(--text-rgb))] transition-colors duration-200">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
-                        <h1 className="text-xl font-semibold tracking-tight text-[rgb(var(--text-rgb))]">Mnemos</h1>
-                        <span className="text-xs text-[rgb(var(--accent-rgb))]">User: {userId}</span>
+                        <div>
+                            <h1 className="text-xl font-semibold tracking-tight text-[rgb(var(--text-rgb))]">Mnemos</h1>
+                            <p className="hidden md:block text-[11px] uppercase tracking-[0.14em] text-[rgb(var(--text-muted-rgb))]">Context-Aware Memory Chat</p>
+                        </div>
+                        <span className="text-[11px] md:text-xs text-[rgb(var(--accent-rgb))] border border-[rgb(var(--surface-border-rgb)/0.34)] bg-[rgb(var(--bg-alt-rgb)/0.68)] rounded-full px-2.5 py-1">
+                            User: {userId}
+                        </span>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={toggleTheme}
-                            className="text-sm bg-[rgb(var(--bg-alt-rgb))] hover:bg-[rgb(var(--panel-rgb))] active:scale-[0.99] border border-[rgb(var(--accent-rgb)/0.45)] text-[rgb(var(--text-rgb))] px-3 py-1.5 rounded-lg transition-all duration-200"
+                            className="text-sm bg-[rgb(var(--bg-alt-rgb)/0.86)] hover:bg-[rgb(var(--panel-2-rgb))] active:scale-[0.99] border border-[rgb(var(--surface-border-rgb)/0.4)] text-[rgb(var(--text-rgb))] px-3 py-1.5 rounded-lg transition-all duration-200"
                         >
                             {theme === "dark" ? "Light Mode" : "Dark Mode"}
                         </button>
-                        <button onClick={logout} className="text-sm bg-[rgb(var(--bg-alt-rgb))] hover:bg-[rgb(var(--panel-rgb))] active:scale-[0.99] border border-[rgb(var(--accent-rgb)/0.45)] text-[rgb(var(--text-rgb))] px-3 py-1.5 rounded-lg transition-all duration-200">
+                        <button onClick={logout} className="text-sm bg-[rgb(var(--bg-alt-rgb)/0.86)] hover:bg-[rgb(var(--panel-2-rgb))] active:scale-[0.99] border border-[rgb(var(--surface-border-rgb)/0.4)] text-[rgb(var(--text-rgb))] px-3 py-1.5 rounded-lg transition-all duration-200">
                             Logout
                         </button>
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-5 md:p-6">
                     {messages.length === 0 ? (
                         <div className="flex items-center justify-center h-full">
-                            <div className="max-w-2xl w-full rounded-2xl border border-[rgb(var(--accent-rgb)/0.45)] bg-[rgb(var(--panel-rgb)/0.88)] px-6 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
+                            <div className="max-w-2xl w-full rounded-2xl border border-[rgb(var(--surface-border-rgb)/0.36)] bg-[linear-gradient(155deg,rgb(var(--panel-rgb)/0.92),rgb(var(--panel-2-rgb)/0.82))] px-6 py-6 shadow-[0_14px_38px_rgb(var(--shadow-rgb)/0.16)]">
                                 <p className="text-xs uppercase tracking-[0.18em] text-[rgb(var(--accent-rgb))] mb-2">Mnemos</p>
                                 <p className="text-lg leading-relaxed text-[rgb(var(--text-rgb))]">
                                     <TypewriterText text={WELCOME_MESSAGE} speed={16} active={showAnimatedWelcome} />
                                 </p>
-                                <p className="text-sm text-[rgb(var(--accent-rgb))] mt-3">Start by sharing anything you want me to remember.</p>
+                                <p className="text-sm text-[rgb(var(--text-muted-rgb))] mt-3">Start by sharing anything you want me to remember.</p>
                             </div>
                         </div>
                     ) : (
-                        <div className="max-w-4xl mx-auto space-y-5">
+                        <div className="max-w-4xl mx-auto space-y-4 md:space-y-5">
                             {messages.map((msg, idx) => {
                                 const messageKey = msg.id || `${msg.role}-${idx}`;
                                 const isCopied = copiedMessageKey === messageKey;
@@ -713,19 +721,19 @@ function App() {
                                 if (isPendingAssistant) return null;
                                 return (
                                 <div key={messageKey} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
-                                    <div className="group max-w-[85%]">
+                                    <div className="group max-w-[88%] md:max-w-[82%]">
                                         <div className={`flex items-center gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
                                             {!isUser && (
-                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[rgb(var(--accent-rgb)/0.45)] bg-[rgb(var(--panel-rgb))] text-[rgb(var(--text-rgb))] text-sm font-semibold flex items-center justify-center">
+                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[rgb(var(--surface-border-rgb)/0.42)] bg-[rgb(var(--panel-deep-rgb))] text-[rgb(var(--text-rgb))] text-sm font-semibold flex items-center justify-center">
                                                     M
                                                 </div>
                                             )}
                                             <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
                                                 <div
-                                                    className={`rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
+                                                    className={`rounded-2xl px-5 py-3 transition-all duration-200 ${
                                                         isUser
-                                                            ? "bg-[rgb(var(--text-rgb))] text-[rgb(var(--bg-alt-rgb))]"
-                                                            : "bg-[rgb(var(--panel-2-rgb))] text-[rgb(var(--text-rgb))] border border-[rgb(var(--accent-rgb)/0.35)]"
+                                                            ? "bg-[linear-gradient(145deg,rgb(var(--accent-rgb)),rgb(var(--accent-soft-rgb)))] text-[rgb(var(--on-accent-rgb))] border border-[rgb(var(--accent-rgb)/0.62)] shadow-[0_10px_24px_rgb(var(--shadow-rgb)/0.18)]"
+                                                            : "bg-[rgb(var(--panel-2-rgb)/0.92)] text-[rgb(var(--text-rgb))] border border-[rgb(var(--surface-border-rgb)/0.3)] shadow-[0_7px_16px_rgb(var(--shadow-rgb)/0.12)]"
                                                     }`}
                                                 >
                                                     <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
@@ -734,7 +742,7 @@ function App() {
                                                     type="button"
                                                     aria-label="Copy message"
                                                     onClick={() => copyMessageToClipboard(msg.content, messageKey)}
-                                                    className="mt-1 inline-flex h-8 w-8 items-center justify-center text-[rgb(var(--accent-rgb))] opacity-0 transition-all duration-200 delay-0 group-hover:opacity-100 group-hover:delay-150 hover:text-[rgb(var(--text-rgb))] focus:opacity-100 focus:delay-0 focus:outline-none"
+                                                    className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-[rgb(var(--accent-rgb))] opacity-0 transition-all duration-200 delay-0 group-hover:opacity-100 group-hover:delay-150 hover:bg-[rgb(var(--bg-alt-rgb)/0.7)] hover:text-[rgb(var(--text-rgb))] focus:opacity-100 focus:delay-0 focus:outline-none"
                                                 >
                                                     {isCopied ? (
                                                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
@@ -749,7 +757,7 @@ function App() {
                                                 </button>
                                             </div>
                                             {isUser && (
-                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[rgb(var(--accent-rgb)/0.45)] bg-[rgb(var(--panel-rgb))] text-[rgb(var(--text-rgb))] text-sm font-semibold flex items-center justify-center">
+                                                <div className="h-8 w-8 shrink-0 rounded-full border border-[rgb(var(--surface-border-rgb)/0.42)] bg-[rgb(var(--accent-rgb)/0.28)] text-[rgb(var(--text-rgb))] text-sm font-semibold flex items-center justify-center">
                                                     {userInitial}
                                                 </div>
                                             )}
@@ -759,7 +767,7 @@ function App() {
                             )})}
                             {isWaitingResponse && (
                                 <div className="flex justify-start">
-                                    <div className="bg-[rgb(var(--panel-2-rgb))] border border-[rgb(var(--accent-rgb)/0.35)] rounded-2xl px-4 py-3 text-[rgb(var(--accent-rgb))] text-sm min-w-[70px] inline-flex items-center justify-center">
+                                    <div className="bg-[rgb(var(--panel-2-rgb)/0.9)] border border-[rgb(var(--surface-border-rgb)/0.3)] rounded-2xl px-4 py-3 text-[rgb(var(--accent-rgb))] text-sm min-w-[70px] inline-flex items-center justify-center shadow-[0_7px_16px_rgb(var(--shadow-rgb)/0.12)]">
                                         <BouncingDots />
                                     </div>
                                 </div>
@@ -769,7 +777,7 @@ function App() {
                     )}
                 </div>
 
-                <div className="bg-[rgb(var(--panel-rgb)/0.92)] border-t border-[rgb(var(--accent-rgb)/0.35)] p-4 backdrop-blur">
+                <div className="bg-[rgb(var(--panel-rgb)/0.88)] border-t border-[rgb(var(--surface-border-rgb)/0.28)] p-4 backdrop-blur">
                     <div className="max-w-4xl mx-auto flex items-end gap-3">
                         <textarea
                             ref={textareaRef}
@@ -779,12 +787,12 @@ function App() {
                             rows={1}
                             placeholder="Type your message..."
                             disabled={isLoading}
-                            className="flex-1 min-h-[48px] max-h-[180px] resize-none bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--accent-rgb)/0.45)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--accent-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb))] transition-all duration-200 disabled:opacity-50 custom-scrollbar"
+                            className="flex-1 min-h-[48px] max-h-[180px] resize-none bg-[rgb(var(--bg-alt-rgb)/0.82)] border border-[rgb(var(--surface-border-rgb)/0.4)] text-[rgb(var(--text-rgb))] placeholder-[rgb(var(--text-muted-rgb))] rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.55)] transition-all duration-200 disabled:opacity-50 custom-scrollbar"
                         />
                         <button
                             onClick={sendMessage}
                             disabled={isLoading || !inputMessage.trim()}
-                            className="bg-[rgb(var(--accent-rgb))] hover:bg-[rgb(var(--text-rgb))] active:scale-[0.99] disabled:bg-[rgb(var(--panel-rgb))] disabled:text-[rgb(var(--accent-rgb))] disabled:cursor-not-allowed text-[rgb(var(--bg-alt-rgb))] font-semibold px-6 py-3 rounded-xl transition-all duration-200"
+                            className="bg-[linear-gradient(135deg,rgb(var(--accent-rgb)),rgb(var(--accent-soft-rgb)))] hover:brightness-105 active:scale-[0.99] disabled:bg-[rgb(var(--panel-rgb))] disabled:text-[rgb(var(--accent-rgb))] disabled:cursor-not-allowed text-[rgb(var(--on-accent-rgb))] font-semibold px-6 py-3 rounded-xl transition-all duration-200 shadow-[0_10px_24px_rgb(var(--shadow-rgb)/0.2)]"
                         >
                             {isLoading ? "Sending..." : "Send"}
                         </button>

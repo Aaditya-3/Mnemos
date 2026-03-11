@@ -194,16 +194,17 @@ export default function App() {
     <div className="min-h-screen bg-[rgb(var(--bg-rgb))] text-[rgb(var(--text-rgb))] p-4 md:p-6">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_8%_10%,rgb(var(--glow-b-rgb)/0.14),transparent_40%),radial-gradient(circle_at_90%_12%,rgb(var(--glow-a-rgb)/0.16),transparent_38%)]" />
       <div className="relative mx-auto max-w-4xl">
-        <section className="rounded-3xl border border-[rgb(var(--border-rgb)/0.35)] bg-[rgb(var(--panel-rgb)/0.86)] p-4 md:p-5 backdrop-blur shadow-[0_22px_60px_rgb(var(--overlay-rgb)/0.22)]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgb(var(--border-rgb)/0.35)] pb-3 mb-3">
+        <section className="rounded-3xl border border-[rgb(var(--surface-border-rgb)/0.35)] bg-[rgb(var(--panel-rgb)/0.82)] p-4 md:p-5 backdrop-blur-xl shadow-[0_22px_52px_rgb(var(--shadow-rgb)/0.2)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgb(var(--surface-border-rgb)/0.3)] pb-3 mb-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-[rgb(var(--accent-rgb))]">Mnemos</p>
               <h1 className="text-xl font-semibold tracking-tight">Vite Workspace</h1>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-[rgb(var(--text-muted-rgb))]">Subtle UI Theme</p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-                className="rounded-lg border border-[rgb(var(--border-rgb)/0.45)] bg-[rgb(var(--bg-alt-rgb))] px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[rgb(var(--panel-2-rgb))]"
+                className="rounded-lg border border-[rgb(var(--surface-border-rgb)/0.45)] bg-[rgb(var(--bg-alt-rgb)/0.85)] px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[rgb(var(--panel-2-rgb))]"
               >
                 {theme === "dark" ? "Light Mode" : "Dark Mode"}
               </button>
@@ -213,7 +214,7 @@ export default function App() {
                   setUserId(e.target.value);
                   localStorage.setItem("user_id", e.target.value);
                 }}
-                className="w-[130px] bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--border-rgb)/0.45)] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.65)]"
+                className="w-[130px] bg-[rgb(var(--bg-alt-rgb)/0.86)] border border-[rgb(var(--surface-border-rgb)/0.42)] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.55)]"
               />
             </div>
           </div>
@@ -225,10 +226,10 @@ export default function App() {
               m.id === typingMessageIdRef.current ? null : (
                 <div
                   key={m.id || i}
-                  className={`rounded-2xl border px-3.5 py-2.5 ${
+                  className={`rounded-2xl border px-4 py-2.5 ${
                     m.role === "user"
-                      ? "bg-[rgb(var(--accent-rgb)/0.22)] border-[rgb(var(--accent-rgb)/0.5)]"
-                      : "bg-[rgb(var(--panel-2-rgb))] border-[rgb(var(--border-rgb)/0.28)]"
+                      ? "bg-[linear-gradient(145deg,rgb(var(--accent-rgb)/0.95),rgb(var(--accent-soft-rgb)/0.88))] text-[rgb(var(--on-accent-rgb))] border-[rgb(var(--accent-rgb)/0.62)] shadow-[0_10px_20px_rgb(var(--shadow-rgb)/0.14)]"
+                      : "bg-[rgb(var(--panel-2-rgb)/0.92)] border-[rgb(var(--surface-border-rgb)/0.3)] shadow-[0_6px_14px_rgb(var(--shadow-rgb)/0.1)]"
                   }`}
                 >
                   <div className="text-[11px] uppercase tracking-[0.08em] text-[rgb(var(--text-muted-rgb))] mb-1">
@@ -239,7 +240,7 @@ export default function App() {
               )
             )}
             {waiting && (
-              <div className="rounded-2xl px-3.5 py-2.5 bg-[rgb(var(--panel-2-rgb))] border border-[rgb(var(--border-rgb)/0.3)] inline-flex items-center gap-2">
+              <div className="rounded-2xl px-3.5 py-2.5 bg-[rgb(var(--panel-2-rgb)/0.92)] border border-[rgb(var(--surface-border-rgb)/0.3)] inline-flex items-center gap-2 shadow-[0_6px_14px_rgb(var(--shadow-rgb)/0.1)]">
                 <span className="typing-dots" aria-label="Assistant is thinking">
                   <span className="typing-dot" />
                   <span className="typing-dot" />
@@ -253,13 +254,13 @@ export default function App() {
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="flex-1 min-h-[62px] bg-[rgb(var(--bg-alt-rgb))] border border-[rgb(var(--border-rgb)/0.45)] rounded-xl p-3 placeholder-[rgb(var(--text-muted-rgb))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.65)]"
+              className="flex-1 min-h-[62px] bg-[rgb(var(--bg-alt-rgb)/0.85)] border border-[rgb(var(--surface-border-rgb)/0.42)] rounded-xl p-3 placeholder-[rgb(var(--text-muted-rgb))] focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent-rgb)/0.55)]"
               placeholder="Type your message..."
             />
             <button
               onClick={send}
               disabled={loading}
-              className="self-end rounded-xl bg-[rgb(var(--accent-rgb))] text-[rgb(var(--on-accent-rgb))] px-4 py-2 font-semibold hover:bg-[rgb(var(--accent-soft-rgb))] disabled:opacity-50 transition-colors"
+              className="self-end rounded-xl bg-[linear-gradient(135deg,rgb(var(--accent-rgb)),rgb(var(--accent-soft-rgb)))] text-[rgb(var(--on-accent-rgb))] px-4 py-2 font-semibold hover:brightness-105 disabled:opacity-50 transition-all duration-200 shadow-[0_10px_20px_rgb(var(--shadow-rgb)/0.16)]"
             >
               {loading ? "Sending..." : "Send"}
             </button>
