@@ -20,6 +20,7 @@ try:
         Filter,
         MatchAny,
         MatchValue,
+        PayloadSchemaType,
         PointStruct,
         VectorParams,
     )
@@ -30,6 +31,7 @@ except Exception:
     Filter = None
     MatchAny = None
     MatchValue = None
+    PayloadSchemaType = None
     PointStruct = None
     VectorParams = None
 
@@ -71,21 +73,22 @@ class QdrantMemoryService:
         try:
             existing = self.client.get_collections().collections
             names = {c.name for c in existing}
-            if self.collection in names:
-                return
-            self.client.create_collection(
-                collection_name=self.collection,
-                vectors_config=VectorParams(
-                    size=self.vector_size,
-                    distance=Distance.COSINE,
-                ),
-            )
-            log_event(
-                "qdrant_collection_created",
-                collection=self.collection,
-                vector_size=self.vector_size,
-                distance="cosine",
-            )
+            if self.collection not in names:
+                self.client.create_collection(
+                    collection_name=self.collection,
+                    vectors_config=VectorParams(
+                        size=self.vector_size,
+                        distance=Distance.COSINE,
+                    ),
+                )
+                log_event(
+                    "qdrant_collection_created",
+                    collection=self.collection,
+                    vector_size=self.vector_size,
+                    distance="cosine",
+                )
+            # Ensure payload indexes required by filtered searches are present.
+            self._ensure_payload_indexes()
         except Exception as exc:
             log_event(
                 "qdrant_collection_init_failed",
@@ -93,6 +96,48 @@ class QdrantMemoryService:
                 error=str(exc),
             )
             raise
+
+    def _ensure_payload_indexes(self):
+        if self.client is None:
+            return
+        # Search filters rely on these payload keys in _search_filter().
+        wanted = [
+            ("user_id", "KEYWORD"),
+            ("scope", "KEYWORD"),
+            ("importance", "KEYWORD"),
+            ("is_active", "BOOL"),
+        ]
+        for field_name, schema_name in wanted:
+            try:
+                schema = getattr(PayloadSchemaType, schema_name) if PayloadSchemaType is not None else schema_name.lower()
+                self.client.create_payload_index(
+                    collection_name=self.collection,
+                    field_name=field_name,
+                    field_schema=schema,
+                    wait=True,
+                )
+                log_event(
+                    "qdrant_payload_index_ensured",
+                    collection=self.collection,
+                    field=field_name,
+                    schema=schema_name.lower(),
+                )
+            except Exception as exc:
+                # Benign when index already exists; still log for observability.
+                message = str(exc)
+                if "already exists" in message.lower():
+                    log_event(
+                        "qdrant_payload_index_exists",
+                        collection=self.collection,
+                        field=field_name,
+                    )
+                    continue
+                log_event(
+                    "qdrant_payload_index_ensure_failed",
+                    collection=self.collection,
+                    field=field_name,
+                    error=message,
+                )
 
     def _to_payload(self, memory: SemanticMemory) -> dict[str, Any]:
         importance = _importance_label(float(memory.importance_score))
