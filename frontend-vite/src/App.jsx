@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
 const API_STREAM_URL = "/chat/stream";
-const SEMANTIC_MEMORIES_API = "/memories/semantic";
 const THEME_KEY = "mnemos_theme";
 
 function resolveInitialTheme() {
@@ -40,7 +39,6 @@ export default function App() {
   const [userId, setUserId] = useState(localStorage.getItem("user_id") || "demo");
   const [text, setText] = useState("");
   const [messages, setMessages] = useState([]);
-  const [semantic, setSemantic] = useState([]);
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const endRef = useRef(null);
@@ -126,12 +124,6 @@ export default function App() {
     return h;
   };
 
-  const loadSemantic = async () => {
-    const r = await fetch(SEMANTIC_MEMORIES_API, { headers: headers(false) });
-    const data = await r.json();
-    setSemantic(data.memories || []);
-  };
-
   const send = async () => {
     if (!text.trim() || loading) return;
     const msg = text.trim();
@@ -183,7 +175,6 @@ export default function App() {
       }
       finishTyping();
       await waitTypingDrain();
-      await loadSemantic();
     } catch (err) {
       startTyping(assistantId);
       queueTyping(assistantId, `Error: ${err.message}`);
@@ -202,7 +193,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[rgb(var(--bg-rgb))] text-[rgb(var(--text-rgb))] p-4 md:p-6">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_8%_10%,rgb(var(--glow-b-rgb)/0.14),transparent_40%),radial-gradient(circle_at_90%_12%,rgb(var(--glow-a-rgb)/0.16),transparent_38%)]" />
-      <div className="relative mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+      <div className="relative mx-auto max-w-4xl">
         <section className="rounded-3xl border border-[rgb(var(--border-rgb)/0.35)] bg-[rgb(var(--panel-rgb)/0.86)] p-4 md:p-5 backdrop-blur shadow-[0_22px_60px_rgb(var(--overlay-rgb)/0.22)]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgb(var(--border-rgb)/0.35)] pb-3 mb-3">
             <div>
@@ -274,32 +265,6 @@ export default function App() {
             </button>
           </div>
         </section>
-
-        <aside className="rounded-3xl border border-[rgb(var(--border-rgb)/0.35)] bg-[rgb(var(--panel-rgb)/0.86)] p-4 md:p-5 backdrop-blur shadow-[0_16px_40px_rgb(var(--overlay-rgb)/0.16)]">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold tracking-tight">Semantic Memory</h2>
-            <button
-              onClick={loadSemantic}
-              className="text-xs px-2.5 py-1.5 rounded-lg border border-[rgb(var(--border-rgb)/0.45)] bg-[rgb(var(--bg-alt-rgb))] hover:bg-[rgb(var(--panel-2-rgb))] transition-colors"
-            >
-              Refresh
-            </button>
-          </div>
-          <div className="space-y-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
-            {semantic.map((m) => (
-              <div
-                key={m.memory_id || m.id}
-                className="rounded-xl border border-[rgb(var(--border-rgb)/0.35)] bg-[rgb(var(--bg-alt-rgb)/0.75)] p-2.5 text-sm"
-              >
-                <div className="text-xs text-[rgb(var(--text-muted-rgb))]">
-                  {(m.memory_type || m.type || "memory")} - {m.scope} - {Number(m.importance_score || 0).toFixed(2)}
-                </div>
-                <div className="mt-1 whitespace-pre-wrap">{m.content}</div>
-              </div>
-            ))}
-            {!semantic.length && <div className="text-sm text-[rgb(var(--text-muted-rgb))]">No semantic memories yet.</div>}
-          </div>
-        </aside>
       </div>
     </div>
   );

@@ -3,7 +3,6 @@ const { useEffect, useRef, useState } = React;
 const API_URL = "/chat";
 const API_STREAM_URL = "/chat/stream";
 const CHATS_API = "/chats";
-const SEMANTIC_MEMORIES_API = "/memories/semantic";
 const USER_ID_KEY = "user_id";
 const THEME_KEY = "mnemos_theme";
 const WELCOME_MESSAGE =
@@ -169,8 +168,6 @@ function App() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
     const [copiedMessageKey, setCopiedMessageKey] = useState("");
-    const [semanticPanelOpen, setSemanticPanelOpen] = useState(false);
-    const [semanticMemories, setSemanticMemories] = useState([]);
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
     const copyResetTimerRef = useRef(null);
@@ -211,11 +208,6 @@ function App() {
         if (!userId) return;
         loadChats();
     }, [userId]);
-
-    useEffect(() => {
-        if (!userId || !semanticPanelOpen) return;
-        loadSemanticMemories();
-    }, [userId, semanticPanelOpen]);
 
     useEffect(() => {
         if (!userId) return;
@@ -440,31 +432,6 @@ function App() {
         }
     };
 
-    const loadSemanticMemories = async () => {
-        try {
-            const response = await fetch(SEMANTIC_MEMORIES_API, { headers: getHeaders(false, true) });
-            const data = await parseApiResponse(response);
-            if (!response.ok) throw new Error(data.error || data.detail || "Failed to load semantic memories");
-            setSemanticMemories(data.memories || []);
-        } catch (error) {
-            console.error("Error loading semantic memories:", error);
-        }
-    };
-
-    const deleteSemanticMemory = async (memoryId) => {
-        try {
-            const response = await fetch(`${SEMANTIC_MEMORIES_API}/${memoryId}`, {
-                method: "DELETE",
-                headers: getHeaders(false, true),
-            });
-            const data = await parseApiResponse(response);
-            if (!response.ok) throw new Error(data.error || data.detail || "Failed to delete semantic memory");
-            setSemanticMemories((prev) => prev.filter((m) => (m.memory_id || m.id) !== memoryId));
-        } catch (error) {
-            console.error("Error deleting semantic memory:", error);
-        }
-    };
-
     const streamAssistantReply = (fullText, messageId = null) => {
         const targetId = messageId || `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         if (!messageId) {
@@ -575,7 +542,6 @@ function App() {
                 await waitForAssistantTypingDrain();
             }
             await loadChats();
-            if (semanticPanelOpen) await loadSemanticMemories();
         } catch (error) {
             console.error("Error sending message:", error);
             setIsWaitingResponse(false);
@@ -716,20 +682,6 @@ function App() {
                         >
                             {theme === "dark" ? "Light Mode" : "Dark Mode"}
                         </button>
-                        <button
-                            onClick={async () => {
-                                const next = !semanticPanelOpen;
-                                setSemanticPanelOpen(next);
-                                if (next) await loadSemanticMemories();
-                            }}
-                            className={`text-sm border px-3 py-1.5 rounded-lg transition-all duration-200 ${
-                                semanticPanelOpen
-                                    ? "bg-[rgb(var(--text-rgb))] text-[rgb(var(--bg-alt-rgb))] border-[rgb(var(--text-rgb))]"
-                                    : "bg-[rgb(var(--bg-alt-rgb))] hover:bg-[rgb(var(--panel-rgb))] text-[rgb(var(--text-rgb))] border-[rgb(var(--accent-rgb)/0.45)]"
-                            }`}
-                        >
-                            Memory Inspector
-                        </button>
                         <button onClick={logout} className="text-sm bg-[rgb(var(--bg-alt-rgb))] hover:bg-[rgb(var(--panel-rgb))] active:scale-[0.99] border border-[rgb(var(--accent-rgb)/0.45)] text-[rgb(var(--text-rgb))] px-3 py-1.5 rounded-lg transition-all duration-200">
                             Logout
                         </button>
@@ -839,40 +791,6 @@ function App() {
                     </div>
                 </div>
             </div>
-
-            {semanticPanelOpen && (
-                <div className="w-[360px] border-l border-[rgb(var(--accent-rgb)/0.35)] bg-[rgb(var(--panel-deep-rgb))] flex flex-col">
-                    <div className="px-4 py-3 border-b border-[rgb(var(--accent-rgb)/0.35)] flex items-center justify-between">
-                        <h2 className="text-sm font-semibold text-[rgb(var(--text-rgb))]">Semantic Memory Inspector</h2>
-                        <span className="text-xs text-[rgb(var(--accent-rgb))]">{semanticMemories.length} items</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
-                        {semanticMemories.length === 0 ? (
-                            <div className="text-sm text-[rgb(var(--accent-rgb))]">No semantic memories yet.</div>
-                        ) : (
-                            semanticMemories.map((m) => (
-                                <div key={m.memory_id || m.id} className="rounded-xl border border-[rgb(var(--accent-rgb)/0.35)] bg-[rgb(var(--bg-alt-rgb))] p-3">
-                                    <div className="text-xs text-[rgb(var(--accent-rgb))] flex items-center justify-between">
-                                        <span>{m.memory_type || m.type || "memory"} - {m.scope || "user"}</span>
-                                        <button
-                                            onClick={() => deleteSemanticMemory(m.memory_id || m.id)}
-                                            className="text-red-300 hover:text-red-200"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
-                                    <div className="text-sm text-[rgb(var(--text-rgb))] mt-2 whitespace-pre-wrap break-words">
-                                        {m.content}
-                                    </div>
-                                    <div className="text-[11px] text-[rgb(var(--accent-rgb))] mt-2">
-                                        Importance: {Number(m.importance_score || 0).toFixed(2)}
-                                    </div>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-            )}
 
             {deleteConfirmChatId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm fade-in">
