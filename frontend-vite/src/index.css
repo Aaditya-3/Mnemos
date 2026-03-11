@@ -2,8 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --base-1-rgb: 34 40 49;     /* #222831 */
+  --base-2-rgb: 57 62 70;     /* #393E46 */
+  --base-3-rgb: 148 137 121;  /* #948979 */
+  --base-4-rgb: 223 208 184;  /* #DFD0B8 */
+}
+
+:root[data-theme="dark"],
+:root:not([data-theme]) {
+  color-scheme: dark;
+  --bg-rgb: var(--base-1-rgb);
+  --bg-alt-rgb: 41 48 58;
+  --panel-rgb: var(--base-2-rgb);
+  --panel-2-rgb: 49 54 62;
+  --panel-deep-rgb: 38 44 53;
+  --accent-rgb: var(--base-3-rgb);
+  --accent-soft-rgb: var(--base-4-rgb);
+  --text-rgb: var(--base-4-rgb);
+  --text-muted-rgb: 184 171 150;
+  --on-accent-rgb: var(--base-1-rgb);
+  --border-rgb: var(--base-3-rgb);
+  --glow-a-rgb: var(--base-3-rgb);
+  --glow-b-rgb: var(--base-4-rgb);
+  --overlay-rgb: 16 21 29;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-rgb: var(--base-4-rgb);
+  --bg-alt-rgb: 239 227 206;
+  --panel-rgb: 248 239 225;
+  --panel-2-rgb: 232 215 188;
+  --panel-deep-rgb: 216 197 168;
+  --accent-rgb: var(--base-3-rgb);
+  --accent-soft-rgb: var(--base-2-rgb);
+  --text-rgb: var(--base-1-rgb);
+  --text-muted-rgb: var(--base-2-rgb);
+  --on-accent-rgb: var(--base-1-rgb);
+  --border-rgb: var(--base-2-rgb);
+  --glow-a-rgb: var(--base-2-rgb);
+  --glow-b-rgb: var(--base-3-rgb);
+  --overlay-rgb: var(--base-1-rgb);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
+  margin: 0;
   font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 8% 8%, rgb(var(--glow-b-rgb) / 0.16), transparent 42%),
+    radial-gradient(circle at 92% 12%, rgb(var(--glow-a-rgb) / 0.16), transparent 40%),
+    rgb(var(--bg-rgb));
+  color: rgb(var(--text-rgb));
+  transition: background 320ms ease, color 240ms ease;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 @keyframes typingDotBounce {
@@ -28,7 +89,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 9999px;
-  background: #e2e8f0;
+  background: rgb(var(--text-rgb));
   animation: typingDotBounce 0.9s ease-in-out infinite;
 }
 
@@ -38,4 +99,21 @@ body {
 
 .typing-dot:nth-child(3) {
   animation-delay: 0.24s;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgb(var(--panel-rgb) / 0.58);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(var(--accent-rgb));
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent-soft-rgb));
 }
