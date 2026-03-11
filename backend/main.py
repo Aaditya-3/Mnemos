@@ -108,6 +108,8 @@ SHORT_STANDALONE_MESSAGES = {
 MEMORY_QUERY_PATTERNS = [
     r"\bwhat(?:'s| is)\s+my\b",
     r"\bwhen\s+(?:is|was)\s+my\b",
+    r"\b(?:say|tell|show|remind|recall|remember|repeat)\s+(?:me\s+)?my\s+(?:name|college|university|year|graduation\s+year|year\s+of\s+graduation)\b",
+    r"\b(?:about|regarding)\s+my\s+(?:name|college|university|year|graduation\s+year|year\s+of\s+graduation)\b",
     r"\bmy\s+(?:favou?rite|fav)\b",
     r"\bwhat\s+do\s+i\s+like\b",
     r"\bdo\s+you\s+remember\b",
@@ -126,6 +128,35 @@ NON_MEMORY_TASK_MARKERS = {
     "compile",
     "build",
     "deploy",
+}
+IDENTITY_QUERY_CUES = {
+    "what",
+    "whats",
+    "who",
+    "which",
+    "when",
+    "say",
+    "tell",
+    "show",
+    "remind",
+    "recall",
+    "remember",
+    "repeat",
+    "confirm",
+    "share",
+    "know",
+    "about",
+    "regarding",
+    "ask",
+    "asking",
+    "asked",
+    "question",
+    "answer",
+}
+IDENTITY_SLOT_ALIAS_PATTERNS = {
+    "name": r"name",
+    "college": r"(?:college|university)",
+    "year": r"(?:year|graduation\s+year|year\s+of\s+graduation)",
 }
 GENERIC_GREETING_LINE_PATTERNS = [
     r"^\s*how\s+can\s+i\s+help\s+you\s+today\??\s*",
@@ -150,6 +181,55 @@ if not api_key_loaded:
 
 def _word_tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", (text or "").lower())
+
+
+def _detect_identity_slot(message: str) -> str:
+    """
+    Resolve profile-slot lookups even when phrased indirectly:
+    - "say my name"
+    - "tell me my college"
+    - "i am asking about my year"
+    """
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    if not text:
+        return ""
+
+    if re.search(r"\bwho\s+am\s+i\b", text):
+        return "name"
+    if re.search(r"\bwhere\s+do\s+i\s+study\b", text) or re.search(r"\bwhich\s+college\s+am\s+i\s+in\b", text):
+        return "college"
+    if re.search(r"\b(?:what|which)\s+year\s+am\s+i\b", text):
+        return "year"
+
+    tokens = set(_word_tokens(text))
+    for slot, alias_pattern in IDENTITY_SLOT_ALIAS_PATTERNS.items():
+        # Explicit user updates ("my name is ...") are not lookup requests.
+        if re.search(rf"\bmy\s+{alias_pattern}\s+(?:is|was|will\s+be|=)\b", text):
+            continue
+
+        has_slot_ref = bool(re.search(rf"\bmy\s+{alias_pattern}\b", text))
+        if not has_slot_ref:
+            continue
+
+        strong_lookup = bool(
+            re.search(
+                rf"\b(?:what(?:'s|s| is)|which|say|tell|show|remind|recall|remember|repeat|confirm|share|know)\b"
+                rf"[^.!?\n]{{0,42}}\bmy\s+{alias_pattern}\b",
+                text,
+            )
+        )
+        contextual_lookup = bool(re.search(rf"\b(?:about|regarding)\s+my\s+{alias_pattern}\b", text))
+
+        if strong_lookup or contextual_lookup:
+            return slot
+        if "?" in text:
+            return slot
+        if tokens.intersection(IDENTITY_QUERY_CUES):
+            return slot
+        if len(tokens) <= 4:
+            return slot
+
+    return ""
 
 
 def _is_clear_greeting(message: str) -> bool:
@@ -193,6 +273,12 @@ def _is_context_dependent_message(message: str) -> bool:
     if not text or _is_standalone_short_message(text):
         return False
     lower = text.lower()
+    if _detect_identity_slot(lower):
+        return False
+    if re.search(r"\bmy\s+[a-z0-9][a-z0-9' \-]{0,40}\s+(?:is|was|will\s+be|on)\b", lower):
+        return False
+    if re.search(r"\bcall\s+me\s+[a-z0-9][a-z0-9' \-]{1,40}\b", lower):
+        return False
     # Explicit self-contained memory lookup queries should not be mixed with recent context.
     if re.search(r"\bwhat(?:'s|s| is)\s+my\b", lower) or re.search(r"\bwhen\s+(?:is|was)\s+my\b", lower):
         return False
@@ -209,6 +295,8 @@ def _is_memory_lookup_request(message: str) -> bool:
         return False
     if _is_clear_greeting(text) or _is_explicit_reset_request(text):
         return False
+    if _detect_identity_slot(text):
+        return True
 
     subject_key, _, _ = parse_preference_query(text)
     if subject_key:
@@ -243,6 +331,8 @@ def _should_force_memory_unavailable_reply(message: str) -> bool:
     text = (message or "").strip().lower()
     if not text:
         return False
+    if _detect_identity_slot(text):
+        return True
     if parse_preference_query(text)[0]:
         return True
     strong_patterns = [
@@ -276,6 +366,8 @@ def _recent_user_turns(chat_session: "ChatSession", max_turns: int = 2) -> list[
 def _resolution_query_with_recent_context(message: str, chat_session: "ChatSession") -> str:
     base = (message or "").strip()
     if not base:
+        return base
+    if _detect_identity_slot(base):
         return base
     if not _is_context_dependent_message(base):
         return base
@@ -1058,6 +1150,12 @@ def _augment_query_for_continuity(user_message: str, chat_session: ChatSession) 
     msg_l = msg.lower()
     if not msg:
         return msg
+    if _detect_identity_slot(msg_l):
+        return msg
+    if re.search(r"\bmy\s+[a-z0-9][a-z0-9' \-]{0,40}\s+(?:is|was|will\s+be|on)\b", msg_l):
+        return msg
+    if re.search(r"\bcall\s+me\s+[a-z0-9][a-z0-9' \-]{1,40}\b", msg_l):
+        return msg
 
     has_entity_now = bool(re.search(r"\b(?:in|from|of)\s+[a-z0-9' \-]{2,40}\b", msg_l))
     if has_entity_now:
@@ -1675,12 +1773,9 @@ def _interpret_memory_query_type(query: str) -> tuple[str, str]:
     if not text:
         return "other", ""
 
-    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+name\b", text) or re.search(r"\bwho\s+am\s+i\b", text):
-        return "identity", "name"
-    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+(?:college|university)\b", text):
-        return "identity", "college"
-    if re.search(r"\bwhat(?:'s|s| is)\s+my\s+(?:year|graduation year|year of graduation)\b", text):
-        return "identity", "year"
+    slot = _detect_identity_slot(text)
+    if slot:
+        return "identity", slot
     if re.search(r"\bwhen\s+(?:is|was)\s+my\b", text):
         return "event", ""
 
@@ -1712,7 +1807,22 @@ def _memory_matches_profile_slot(memory: Any, slot: str) -> bool:
         if domain == "identity" and category == "name":
             return True
         if mem_type == "fact" and "name" in key_l and not any(
-            bad in key_l for bad in {"company", "project", "anime", "character", "drink", "food"}
+            bad in key_l
+            for bad in {
+                "company",
+                "project",
+                "anime",
+                "character",
+                "drink",
+                "food",
+                "entertainment",
+                "favorite",
+                "favourite",
+                "preference",
+                "rule",
+                "lifestyle",
+                "technical_stack",
+            }
         ):
             return True
     if slot == "college":
