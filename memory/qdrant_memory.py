@@ -252,14 +252,25 @@ class QdrantMemoryService:
         if not query_vector:
             return []
         query_filter = self._search_filter(user_id=user_id, scopes=scopes, importance_levels=importance_levels)
-        points = self.client.search(
-            collection_name=self.collection,
-            query_vector=query_vector,
-            query_filter=query_filter,
-            limit=max(1, int(limit or 5)),
-            with_payload=True,
-            with_vectors=with_vectors,
-        )
+        if hasattr(self.client, "query_points"):
+            response = self.client.query_points(
+                collection_name=self.collection,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=max(1, int(limit or 5)),
+                with_payload=True,
+                with_vectors=with_vectors,
+            )
+            points = list(getattr(response, "points", []) or [])
+        else:
+            points = self.client.search(
+                collection_name=self.collection,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=max(1, int(limit or 5)),
+                with_payload=True,
+                with_vectors=with_vectors,
+            )
         out: list[tuple[SemanticMemory, float]] = []
         for point in points:
             memory = self._point_to_memory(point)
