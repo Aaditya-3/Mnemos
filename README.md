@@ -1,35 +1,55 @@
-# Mnemos: AI Chat with Long-Term Memory
+# Mnemos
 
-Mnemos is a full-stack chat application built with FastAPI + React, powered by Groq for generation, with layered memory (deterministic, structured, and semantic).
+Mnemos is a full-stack AI chat application built with FastAPI and React. It uses Groq for generation and combines three memory layers: deterministic profile memory, structured "brain" memory, and semantic vector memory in Qdrant.
 
-This README reflects the current implementation in this repository.
+This README reflects the current final state of the project in this repository.
 
-## Current Project Level
+## Final Project Snapshot
 
-Implemented and working now:
+- Username/password auth with per-user isolation
+- Multi-chat sessions with persisted history
+- Standard chat, streaming chat, and tool-enabled agent chat endpoints
+- Deterministic memory, structured relational memory, and semantic vector memory
+- Semantic maintenance flows for decay, compression, and re-embedding
+- Built-in frontend served by FastAPI at `/`
+- Optional Vite frontend for a separate frontend workflow
+- Health, metrics, and runtime inspection endpoints
 
-- Username/password auth (`/auth/signup`, `/auth/login`) with per-user chat isolation
-- Multi-chat session management (`/chats`, `/chats/new`, `/chats/{chat_id}`)
-- Main chat endpoint with orchestrator pipeline (`/chat`)
-- SSE streaming chat endpoint (`/chat/stream`)
-- Agent/tool route (`/chat/agent`) with structured tool execution
-- Deterministic memory + structured "brain" memory + semantic vector memory
-- Semantic memory maintenance routes (decay, compress, re-embed)
-- Observability endpoints (`/metrics`, `/health`) and request/security middleware
-- Built-in frontend served by backend at `/` (CDN React + Tailwind + Babel)
-- Optional Vite frontend (`frontend-vite/`) for production-style frontend workflow
-
-## Architecture (Current)
+## Architecture
 
 ```text
 Frontend (served by FastAPI at /)
--> API layer (FastAPI routes)
--> Brain layer (intent, structured extraction, deterministic responses)
--> Orchestrator (context build/rank/assemble)
--> Groq LLM (generation)
--> Persistence (SQLAlchemy relational DB + memory JSON/vector store)
--> Background hooks (semantic ingest/decay/compress/re-embed)
+-> FastAPI routes
+-> Brain layer
+   - intent detection
+   - structured memory extraction
+   - deterministic memory lookup
+   - temporal reasoning
+-> Orchestrator
+   - context build
+   - semantic retrieval
+   - ranking and prompt assembly
+-> Groq LLM
+-> Persistence
+   - SQLite relational database
+   - memory/memories.json deterministic store
+   - Qdrant semantic vector store
+-> Background semantic maintenance
+   - ingest
+   - decay
+   - compression
+   - re-embedding
 ```
+
+## Tech Stack
+
+- Backend: FastAPI, Uvicorn, SQLAlchemy
+- LLM: Groq
+- Embeddings: local sentence-transformers provider by default
+- Vector store: Qdrant with `qdrant-client==1.16.2`
+- Relational storage: SQLite by default
+- Frontend: React with a built-in static UI, plus an optional Vite app
+- Observability: Prometheus metrics and structured runtime logging
 
 ## Repository Structure
 
@@ -38,27 +58,25 @@ Frontend (served by FastAPI at /)
 |-- backend/
 |   |-- main.py                          # FastAPI entrypoint
 |   `-- app/
-|       |-- api/platform.py              # runtime architecture/config introspection endpoints
-|       |-- brain/                       # intent + structured memory layer
-|       |-- config/                      # runtime/ranking/tool config
-|       |-- core/                        # middleware/auth/db/llm/tool primitives
+|       |-- api/platform.py              # runtime architecture/config endpoints
+|       |-- brain/                       # structured memory + intent/temporal reasoning
+|       |-- config/                      # runtime and ranking config
+|       |-- core/                        # auth, db, llm, middleware primitives
 |       |-- embeddings/                  # embedding provider abstraction
-|       |-- llm/                         # LLM client adapter and retries
-|       |-- observability/               # logging + metrics
-|       |-- orchestrator/                # prompt/context/stream pipeline
-|       |-- security/                    # replay + JWT rotation utilities
-|       |-- services/                    # semantic memory/tool/streaming services
-|       |-- tasks/                       # background task entrypoints + celery wiring
-|       `-- tools/                       # calculator/currency/web_search tools
-|-- frontend/                            # default UI served at /
-|-- frontend-vite/                       # optional Vite React frontend
-|-- memory/                              # deterministic + semantic fallback stores
+|       |-- observability/               # logging and metrics
+|       |-- orchestrator/                # context build/rank/assemble pipeline
+|       |-- services/                    # semantic memory, streaming, tool routing
+|       |-- tasks/                       # background task entrypoints
+|       `-- tools/                       # calculator, currency, web search
+|-- frontend/                            # built-in UI served at /
+|-- frontend-vite/                       # optional Vite frontend
+|-- memory/                              # deterministic store, Qdrant service, legacy data files
 |-- requirements.txt
 |-- .env.example
 `-- README.md
 ```
 
-## Quick Start
+## Setup
 
 ### 1. Install dependencies
 
@@ -76,26 +94,32 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-Minimum required:
+`backend/main.py` loads `.env` from the project root before the rest of the app starts.
+
+Minimum values to set:
 
 ```env
-GROQ_API_KEY=your_key_here
-```
-
-Recommended before any shared deployment:
-
-```env
+GROQ_API_KEY=your_groq_api_key
 JWT_SECRET=replace_with_a_strong_secret
-APP_ENV=dev
+QDRANT_URL=https://your-qdrant-instance
+QDRANT_API_KEY=your_qdrant_api_key
+QDRANT_COLLECTION=mnemos_semantic_memory
+REQUIRE_QDRANT=true
 ```
 
-### 3. Run backend
+Notes:
+
+- For local Qdrant, use `QDRANT_URL=http://localhost:6333`.
+- If you set `REQUIRE_QDRANT=false`, the app can still boot when Qdrant is unreachable, but semantic vector retrieval will be disabled. The current code does not fall back to a JSON semantic vector store.
+- The default embedding setup uses the local `bge-small-en-v1.5` sentence-transformers path.
+
+### 3. Run the backend
 
 ```bash
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. Open app
+### 4. Open the app
 
 ```text
 http://localhost:8000
@@ -103,7 +127,7 @@ http://localhost:8000
 
 The backend serves `frontend/index.html` directly at `/`.
 
-## Optional Frontend (Vite)
+## Optional Vite Frontend
 
 Use this only if you want a separate frontend dev/build workflow.
 
@@ -113,18 +137,18 @@ npm install
 npm run dev
 ```
 
-Vite runs on `http://localhost:5173` and proxies API routes to `http://localhost:8000`.
+Vite runs on `http://localhost:5173` and proxies API calls to `http://localhost:8000`.
 
-## Auth and User Identity
+## Auth and First Request
 
-The UI login/signup flow uses:
+The mounted auth flow is the simple username/password router:
 
 - `POST /auth/signup`
 - `POST /auth/login`
 
-Both return `user_id`. Use that value in `X-User-ID` for user-scoped routes.
+Both return a `user_id`. Use that value in `X-User-ID` for user-scoped endpoints.
 
-Example:
+Example signup:
 
 ```bash
 curl -X POST http://localhost:8000/auth/signup \
@@ -132,7 +156,7 @@ curl -X POST http://localhost:8000/auth/signup \
   -d '{"username":"alice","password":"password123"}'
 ```
 
-Then call chat:
+Example chat call:
 
 ```bash
 curl -X POST http://localhost:8000/chat \
@@ -141,12 +165,12 @@ curl -X POST http://localhost:8000/chat \
   -d '{"message":"I prefer Python for backend work"}'
 ```
 
-Optional token routes are also available:
+Token helpers are also available:
 
-- `POST /auth/token/issue` (requires `X-User-ID`)
+- `POST /auth/token/issue`
 - `POST /auth/token/rotate`
 
-## API Endpoints (Current)
+## API Surface
 
 ### Auth
 
@@ -168,46 +192,47 @@ Optional token routes are also available:
 - `DELETE /chats/{chat_id}`
 - `POST /chats/new`
 
-### User Settings
+### Settings
 
 - `GET /settings`
 - `POST /settings`
 
 ### Memory
 
-- `GET /memories` (deterministic memory store view)
-- `GET /memories/structured` (brain-layer structured memory)
+- `GET /memories`
+- `GET /memories/structured`
 - `GET /memories/semantic`
 - `DELETE /memories/semantic/{memory_id}`
+- `POST /test-memory` - semantic-memory smoke-test endpoint
 
-### Semantic Admin
+### Semantic Maintenance
 
 - `POST /admin/semantic/decay`
 - `POST /admin/semantic/compress`
 - `POST /admin/semantic/reembed`
 
-### Tools and Platform
+### Tools and Runtime Introspection
 
 - `GET /tools`
 - `GET /api/v1/platform/architecture`
 - `GET /api/v1/platform/config`
 
-### Ops
+### Operations
 
 - `GET /metrics`
 - `GET /health`
 
 ### Frontend Assets
 
-- `GET /` (serves `frontend/index.html`)
+- `GET /`
 - `GET /app.jsx`
-- `GET /script.js` (legacy file still exposed)
+- `GET /script.js`
 
-Note: most user-specific routes require `X-User-ID`.
+Most user-specific routes require `X-User-ID`.
 
-## Streaming Events (`/chat/stream`)
+## Streaming Events
 
-Server-Sent Events emitted by stream handler:
+`/chat/stream` emits Server-Sent Events with these event types:
 
 - `start`
 - `tool_call`
@@ -215,25 +240,50 @@ Server-Sent Events emitted by stream handler:
 - `done`
 - `error`
 
-## Memory System
+## Memory Model
 
-Mnemos currently uses three memory layers:
+Mnemos uses three memory layers.
 
-1. Deterministic key/value memory
-- Backed by `memory/memories.json` (or Mongo if enabled)
-- Used for explicit profile/preferences retrieval
+### 1. Deterministic memory
 
-2. Structured brain memory
-- Intent classification + structured extraction
-- Stores preferences/events in relational tables (`user_preferences`, `user_events`)
-- Handles direct logical answers for memory queries when possible
+- Stored in `memory/memories.json`
+- Used for explicit profile and preference style retrieval
+- Managed by the legacy deterministic memory extractor/store path
 
-3. Semantic vector memory
-- Ingests user messages into semantic memory nodes with embeddings
-- Retrieval ranks by similarity + importance + recency
-- Qdrant is preferred backend; local JSON fallback when Qdrant is unavailable
+### 2. Structured brain memory
 
-## Tooling
+- Stored in relational tables such as `user_preferences` and `user_events`
+- Supports intent-aware and logic-aware answers for profile and date queries
+- Serves as the main structured source of truth for extracted user state
+
+### 3. Semantic vector memory
+
+- Embeds user messages into semantic memory nodes
+- Stores semantic points in the Qdrant collection named by `QDRANT_COLLECTION`
+- Retrieves by similarity, then reranks by similarity, importance, and recency
+- Supports maintenance flows for decay, compression, deletion, and re-embedding
+
+Important: the current semantic path is Qdrant-backed. There is no active JSON semantic vector fallback in the current repository code path.
+
+## Data and Persistence
+
+Current source-of-truth storage:
+
+- `memory/app.db`
+  - users
+  - chat sessions and messages
+  - usage logs
+  - user settings
+  - structured preferences
+  - structured events
+- `memory/memories.json`
+  - deterministic key/value memory
+- Qdrant collection `QDRANT_COLLECTION`
+  - semantic vector memory points
+
+Legacy JSON files may still exist in `memory/` from earlier iterations, including `semantic_memories.json`, `structured_memory.json`, `chat_sessions.json`, and `users.json`. The current runtime source of truth is SQLite plus Qdrant plus `memory/memories.json`.
+
+## Tools
 
 Registered tools:
 
@@ -241,29 +291,14 @@ Registered tools:
 - `currency_convert`
 - `web_search`
 
-Tool calling is available through `/chat/agent` and optionally through `/chat` when `use_tools=true`.
-
-## Data and Persistence
-
-Relational DB (`DATABASE_URL`, default `sqlite:///memory/app.db`) stores:
-
-- users
-- chat sessions/messages
-- usage logs
-- user settings
-- structured preferences/events
-
-Semantic memory backend:
-
-- Qdrant collection (`QDRANT_COLLECTION`) when Qdrant is reachable
-- fallback file: `memory/semantic_memories.json`
+Tool execution is available through `/chat/agent` and can also be enabled through the main chat flow when tool routing is active.
 
 ## Key Environment Variables
 
-See `.env.example` for the full list. Most important runtime knobs:
+See `.env.example` for the full template. The most important runtime knobs are:
 
 ```env
-# Required for generation
+# LLM
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
 
@@ -272,7 +307,7 @@ APP_ENV=dev
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///memory/app.db
 
-# Semantic memory + embeddings
+# Semantic memory
 ENABLE_SEMANTIC_MEMORY=true
 EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=bge-small-en-v1.5
@@ -280,7 +315,7 @@ EMBEDDING_DIMS=384
 QDRANT_URL=
 QDRANT_API_KEY=
 QDRANT_COLLECTION=mnemos_semantic_memory
-REQUIRE_QDRANT=false
+REQUIRE_QDRANT=true
 
 # Feature toggles
 ENABLE_STREAMING=true
@@ -296,16 +331,17 @@ MAX_PROMPT_CHARS=6000
 ENABLE_TOOL_SANDBOX=true
 ```
 
-## Operational Notes
+## Operational Checks
 
-- If backend startup prints `GROQ_API_KEY loaded: False`, `.env` is missing/misconfigured.
-- `/health` reports active vector backend and feature toggle states.
-- `/metrics` exposes Prometheus-style counters/histograms.
-- In-memory rate limits/replay tracking and refresh-token store are suitable for local/single-instance use; move these to shared infrastructure (Redis/DB) for multi-instance deployments.
+- Startup should print that `.env` was loaded from the project root.
+- `GET /health` shows whether semantic memory is enabled and which vector backend is active.
+- `GET /metrics` exposes Prometheus-style metrics.
+- `GET /api/v1/platform/config` shows the active vector collection name and runtime toggles.
+- `POST /test-memory` is useful when you want a quick semantic memory ingestion/retrieval smoke test.
 
-## Current Limits and Tradeoffs
+## Current Tradeoffs
 
-- LLM generation is Groq-only in current code path.
-- Local JSON vector fallback is convenient for development but not for distributed consistency.
-- Optional Celery wiring exists, but FastAPI `BackgroundTasks` is the default execution path.
-- Legacy frontend file `frontend/script.js` is still present; primary UI is `frontend/app.jsx`.
+- LLM generation is Groq-only in the current runtime path.
+- The mounted auth flow is a simple local username/password system.
+- FastAPI `BackgroundTasks` is the default semantic maintenance execution path; Celery wiring exists but is optional.
+- `frontend/script.js` is still exposed for compatibility, but `frontend/app.jsx` is the primary frontend entrypoint.

@@ -17,9 +17,14 @@ copy .env.example .env    # Windows
 cp .env.example .env      # Linux/Mac
 ```
 
-Set at minimum:
+Set at minimum for a full local run:
 ```env
 GROQ_API_KEY=your_key_here
+JWT_SECRET=replace_with_a_strong_secret
+QDRANT_URL=https://your-qdrant-instance
+QDRANT_API_KEY=your_qdrant_api_key
+QDRANT_COLLECTION=mnemos_semantic_memory
+REQUIRE_QDRANT=true
 ```
 
 ### 3. Start Backend
@@ -48,14 +53,19 @@ ENABLE_STREAMING=true
 ENABLE_TOOLS=true
 ```
 
-Optional vector backend:
+Semantic vector backend:
 ```env
 DATABASE_URL=sqlite:///memory/app.db
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=
+QDRANT_URL=https://your-qdrant-instance
+QDRANT_API_KEY=your_qdrant_api_key
 QDRANT_COLLECTION=mnemos_semantic_memory
-REQUIRE_QDRANT=false
+REQUIRE_QDRANT=true
 ```
+
+Notes:
+
+- For a local Qdrant instance, use `QDRANT_URL=http://localhost:6333`.
+- If you set `REQUIRE_QDRANT=false`, the app can still start without Qdrant, but semantic vector retrieval is disabled. There is no active JSON semantic fallback in the current code path.
 
 ## Useful Endpoints
 
